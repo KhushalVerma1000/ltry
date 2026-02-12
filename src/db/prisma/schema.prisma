@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+model AdminUser {
+  id    String @id @default(uuid())
+  name  String
+  email String @unique
+}
+
+model User {
+  id       Int        @id @default(autoincrement())
+  publicId String     @unique @default(cuid())
+  name     String
+  phone    BigInt     @unique
+  refreshToken String?
+  seats    Seats[]
+  payments payments[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Pool {
+  id           Int     @id @default(autoincrement())
+  name         String
+  perSeatPrice Decimal
+  totalSeats   Int
+  publicId     String  @unique @default(cuid())
+  seats        Seats[]
+}
+
+model Seats {
+  id       Int        @id @default(autoincrement())
+  name     String
+  poolId   Int
+  userId   Int
+  pool     Pool       @relation(fields: [poolId], references: [id])
+  user     User       @relation(fields: [userId], references: [id])
+  status  String
+}
+
+model payments {
+  id       Int     @id @default(autoincrement())
+  amount   Decimal
+  provider String
+  status   String
+  userId   Int
+  seatsId  Int
+  user     User    @relation(fields: [userId], references: [id])
+}
+
