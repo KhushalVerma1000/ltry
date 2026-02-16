@@ -17,6 +17,7 @@ model AdminUser {
   id    String @id @default(uuid())
   name  String
   email String @unique
+  refreshToken String 
 }
 
 model User {
