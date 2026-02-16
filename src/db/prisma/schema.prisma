@@ -10,54 +10,65 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
+  provider = "postgresql"
 }
 
 model AdminUser {
-  id    String @id @default(uuid())
-  name  String
-  email String @unique
-  refreshToken String 
+  id           String @id @default(uuid())
+  name         String
+  email        String @unique
+  password     String
+  refreshToken String
+    createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 }
 
 model User {
-  id       Int        @id @default(autoincrement())
-  publicId String     @unique @default(cuid())
-  name     String
-  phone    BigInt     @unique
+  id           Int        @id @default(autoincrement())
+  publicId     String     @unique @default(cuid())
+  name         String
+  phone        BigInt     @unique
+  password     String
   refreshToken String?
-  seats    Seats[]
-  payments payments[]
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  seats        Seats[]
+  payments     payments[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 }
 
 model Pool {
-  id           Int     @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
   name         String
   perSeatPrice Decimal
   totalSeats   Int
-  publicId     String  @unique @default(cuid())
+  publicId     String   @unique @default(cuid())
   seats        Seats[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Seats {
-  id       Int        @id @default(autoincrement())
-  name     String
-  poolId   Int
-  userId   Int
-  pool     Pool       @relation(fields: [poolId], references: [id])
-  user     User       @relation(fields: [userId], references: [id])
-  status  String
+  id        Int        @id @default(autoincrement())
+  name      String
+  poolId    Int
+  userId    Int
+  pool      Pool       @relation(fields: [poolId], references: [id])
+  user      User       @relation(fields: [userId], references: [id])
+  status    String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  payments  payments[]
 }
 
 model payments {
-  id       Int     @id @default(autoincrement())
-  amount   Decimal
-  provider String
-  status   String
-  userId   Int
-  seatsId  Int
-  user     User    @relation(fields: [userId], references: [id])
+  id        Int      @id @default(autoincrement())
+  amount    Decimal
+  provider  String
+  status    String
+  userId    Int
+  seatsId   Int
+  user      User     @relation(fields: [userId], references: [id])
+  seats     Seats    @relation(fields: [seatsId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
-

@@ -3,6 +3,7 @@ CREATE TABLE "AdminUser" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "email" TEXT NOT NULL,
+    "refreshToken" TEXT NOT NULL,
 
     CONSTRAINT "AdminUser_pkey" PRIMARY KEY ("id")
 );
@@ -27,6 +28,8 @@ CREATE TABLE "Pool" (
     "perSeatPrice" DECIMAL(65,30) NOT NULL,
     "totalSeats" INTEGER NOT NULL,
     "publicId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Pool_pkey" PRIMARY KEY ("id")
 );
@@ -38,6 +41,8 @@ CREATE TABLE "Seats" (
     "poolId" INTEGER NOT NULL,
     "userId" INTEGER NOT NULL,
     "status" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Seats_pkey" PRIMARY KEY ("id")
 );
@@ -50,6 +55,8 @@ CREATE TABLE "payments" (
     "status" TEXT NOT NULL,
     "userId" INTEGER NOT NULL,
     "seatsId" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "payments_pkey" PRIMARY KEY ("id")
 );
@@ -74,3 +81,6 @@ ALTER TABLE "Seats" ADD CONSTRAINT "Seats_userId_fkey" FOREIGN KEY ("userId") RE
 
 -- AddForeignKey
 ALTER TABLE "payments" ADD CONSTRAINT "payments_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "payments" ADD CONSTRAINT "payments_seatsId_fkey" FOREIGN KEY ("seatsId") REFERENCES "Seats"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
