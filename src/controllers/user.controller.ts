@@ -5,6 +5,11 @@ import { prisma } from "../db/index.js";
 import { passwordHash, comparePassword } from "../utils/autherisationHelper.js";
 import { generateUserTokens } from "../utils/tokenHelper.js";
 
+
+  const cookieOptions ={
+        httponl:true,
+        secure:true
+    }
 const registerUser = asyncHandler(async (req: any, res: any) => {
     const { name, phone, password } = req.body;
     
@@ -20,11 +25,10 @@ const registerUser = asyncHandler(async (req: any, res: any) => {
 
     // Check if user already exists
     const existedUser = await prisma.user.findFirst({
-        where: { phone: BigInt(phone) }
+        where: { phone: phone }
     });
     
     if (existedUser) {
-        console.log(existedUser,"===================register user existed user")
         throw new ApiError(409, "User with this phone already exists");
     }
 
@@ -35,7 +39,7 @@ const registerUser = asyncHandler(async (req: any, res: any) => {
     const newUser = await prisma.user.create({
         data: {
             name: name.toLowerCase(),
-            phone: BigInt(phone),
+            phone: phone,
             password: hashedPassword
         },
         select: {
@@ -58,7 +62,10 @@ const registerUser = asyncHandler(async (req: any, res: any) => {
     });
 
     // Send response
-    return res.status(201).json(
+    return res.status(201)
+    .cookie("refreshToken", refreshToken, cookieOptions)
+    .cookie("accessToken", accessToken, cookieOptions)
+    .json(
         new ApiResponse(
             201,
             {
@@ -74,6 +81,8 @@ const registerUser = asyncHandler(async (req: any, res: any) => {
     );
 });
 
+
+
 const loginUser = asyncHandler(async (req: any, res: any) => {
     const { phone, password } = req.body;
 
@@ -82,7 +91,7 @@ const loginUser = asyncHandler(async (req: any, res: any) => {
     }
 
     const user = await prisma.user.findFirst({
-        where: { phone: BigInt(phone) }
+        where: { phone: phone }
     });
 
     if (!user) {
@@ -106,7 +115,12 @@ const loginUser = asyncHandler(async (req: any, res: any) => {
 
     const { password: _, refreshToken: __, ...userWithoutSensitiveData } = user;
 
-    return res.status(200).json(
+  
+
+
+    return res.status(200).cookie("refreshToken", refreshToken, cookieOptions)
+    .cookie("accessToken", accessToken, cookieOptions)
+    .json(
         new ApiResponse(
             200,
             {
@@ -134,13 +148,16 @@ const logoutUser = asyncHandler(async (req: any, res: any) => {
         data: { refreshToken: null }
     });
 
-    return res.status(200).json(
+    return res.status(200)
+    .clearCookie("refreshToken", cookieOptions)
+    .clearCookie("accessToken", cookieOptions)
+    .json(
         new ApiResponse(200, {}, "Logout successful")
     );
 });
 
 const refreshAccessToken = asyncHandler(async (req: any, res: any) => {
-    const { refreshToken } = req.body;
+    const { refreshToken } = req.cookies.refreshToken || req.body;
 
     if (!refreshToken) {
         throw new ApiError(400, "Refresh token is required");
@@ -172,9 +189,45 @@ const refreshAccessToken = asyncHandler(async (req: any, res: any) => {
     );
 });
 
+
+const getcurrentUser = asyncHandler(async (req: any, res: any) => {
+    const userId = req.user?.id;
+    if (!userId) {
+        throw new ApiError(401, "Unauthorized");
+    }})
+
+
+    
+    const getCurrentSeatsOfUser = asyncHandler(async (req: any, res: any) => {
+    const userId = req.user?.id;
+        
+        if (!userId) { throw new ApiError(401, "Unauthorized");}
+
+    const bookings = await prisma.booking.findMany({
+        where: { userId: userId },
+        include:{
+            seats:{
+                select:{
+                    name:true,
+                    publicId:true
+                }
+            }
+        }
+
+    })
+    
+    return res.status(200).json(new ApiResponse(200, bookings, "User's current bookings retrieved successfully"));
+
+})
+
+
+
 export { 
     registerUser, 
     loginUser, 
     logoutUser, 
-    refreshAccessToken 
+    refreshAccessToken ,
+    getcurrentUser,
+    getCurrentSeatsOfUser
 };
+

@@ -12,6 +12,7 @@ interface TokenPayload {
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 
+
 // Generic function to generate access token
 export const generateAccessToken = (payload: TokenPayload): string => {
     const secret = process.env.ACCESS_TOKEN_SECRET;
@@ -65,10 +66,10 @@ export const verifyRefreshToken = (token: string): TokenPayload => {
 };
 
 // Helper functions for specific user types
-export const generateUserTokens = (userId: number, phone: bigint) => {
+export const generateUserTokens = (userId: number, phone: string) => {
     const accessToken = generateAccessToken({ 
         id: userId, 
-        phone: phone.toString(),
+        phone: phone,
         type: 'user' 
     });
     const refreshToken = generateRefreshToken({ 
