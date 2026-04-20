@@ -1,52 +1,10 @@
-import { bookingStatus, seatStatus, type Seat } from "../db/generated/prisma/client.js";
+import { BookingStatus, SeatStatus, type Seat } from "../db/generated/prisma/client.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { prisma } from "../db/index.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 
-export const getLastSeatNumberForPool = async (poolId: number) => {
-
-    const LastPool = await prisma.pool.findFirst({
-        where: {
-            id: {
-                lt: poolId
-            }
-
-        }, orderBy: {
-            id: "desc"
-        }
-    })
-
-    if (!LastPool) {
-        console.log("no previous pool found for seat look up ")
-        return 0
-    }
-    console.log(LastPool)
-    const prefix = ["A", "B", "C", "D"];
-
-    const lastSeats = await Promise.all(
-        prefix.map((p) =>
-            prisma.seat.findFirst({
-                where: {
-                    poolId: LastPool?.id,
-                    name: { startsWith: p },
-                },
-                orderBy: { name: "desc" }, // safe now — same prefix, so "A099" < "A100" ✅
-            })
-        )
-    );
-
-    const numbers = lastSeats.map((seat) => {
-        if (!seat) return 0;
-        const match = seat.name.match(/[A-Z](\d+)/);
-        return match?.[1] ? parseInt(match[1], 10) : 0;
-    });
-
-    return Math.max(...numbers); // return the highest number across all rows
-};
-
-
-export const generateSeatNameForNewPool = (numberOfSeats: number, startFrom: number = 0) => {
+export const generateSeatNameForRound = (numberOfSeats: number, startFrom: number = 0) => {
     const prefix = ["A", "B", "C", "D"];
     const seatsPerRow = Math.floor(numberOfSeats / 4);
     if (seatsPerRow > 1000) {
@@ -59,7 +17,7 @@ export const generateSeatNameForNewPool = (numberOfSeats: number, startFrom: num
 
     for (let i = 0; i < 4; i++) {
         for (let j = 1; j <= seatsPerRow; j++) {
-            const seatNumber = startFrom + j; // continue from last number
+            const seatNumber = startFrom + j;
             const padded = String(seatNumber).padStart(3, "0");
             seatNames.push(`${prefix[i]}${padded}`);
         }
@@ -68,82 +26,104 @@ export const generateSeatNameForNewPool = (numberOfSeats: number, startFrom: num
     return seatNames;
 };
 
+export const createSeatsforRoundHelper = async (
+    roundPublicId: string,
+    poolId: number,
+    roundId: string | number,
+    seatNumber: number,
+    prismaClient: any = prisma
+) => {
+    const seatNames = generateSeatNameForRound(seatNumber, 0);
 
-export const createSeatsforPoolHelper = async (poolid: number, seatNumber: number) => {
-    const lastNumber = await getLastSeatNumberForPool(poolid);
-    const seatNames = generateSeatNameForNewPool(seatNumber, lastNumber);
+    // Resolve roundId if it's a publicId
+    let actualRoundId: number;
+    if (typeof roundId === 'string') {
+        const round = await prismaClient.poolRound.findUnique({
+            where: { publicId: roundId },
+            select: { id: true }
+        });
+        if (!round) {
+            throw new ApiError(404, "Round not found");
+        }
+        actualRoundId = round.id;
+    } else {
+        actualRoundId = roundId;
+    }
 
     const seatData = seatNames.map((name) => ({
         name,
-        poolId: poolid,
+        roundId: actualRoundId,
+        poolId: poolId
     }));
 
-    const createdSeats = await prisma.seat.createMany({
-        data: seatData,
-
+    const createdSeats = await prismaClient.seat.createMany({
+        data: seatData
     });
 
     return createdSeats;
 };
-const createSeatsforPool = asyncHandler(async (req: any, res: any) => {
 
-    const { poolid, priceperSeat, seatNumber } = req.body;
+// Deprecated: kept for backward compatibility
+export const createSeatsforPoolHelper = async (poolid: number, seatNumber: number) => {
+    throw new ApiError(500, "createSeatsforPoolHelper is deprecated. Use createSeatsforRoundHelper instead.");
+};
 
-    if (!poolid || !priceperSeat || !seatNumber) {
-        throw new ApiError(400, "PoolId, pricePerSeat and seatNumber are required");
+const createSeatsforRound = asyncHandler(async (req: any, res: any) => {
+    const { roundId } = req.params;
+    const { seatNumber } = req.body;
+
+    if (!roundId || !seatNumber) {
+        throw new ApiError(400, "roundId and seatNumber are required");
     }
-    const createdSeats = await createSeatsforPoolHelper(poolid, seatNumber);
-    return createdSeats;
 
-})
+    const round = await prisma.poolRound.findUnique({
+        where: { publicId: roundId },
+        select: { id: true, poolId: true }
+    });
 
-const getPoolSeats = asyncHandler(async (req: any, res: any) => {
-    const { poolid } = req.params;
-
-    if (!poolid) {
-        throw new ApiError(400, "PoolId is required");
+    if (!round) {
+        throw new ApiError(404, "Round not found");
     }
-    const poolDB = await prisma.pool.findUnique({
-        where: {
-            publicId: poolid
-        },
-        select: {
-            id: true
-        }
-    })
-    if (!poolDB) {
-        throw new ApiError(404, "pool does not exist")
-    }
-    const seats = await prisma.seat.findMany({
-        where: {
-            poolId: poolDB.id
 
-        }, select: {
-            name: true,
-            status: true,
-            publicId: true
-        }
-    })
-    return res.status(200).json(new ApiResponse(200, seats, "Seats retrieved successfully"));
+    const createdSeats = await createSeatsforRoundHelper(
+        roundId,
+        round.poolId,
+        round.id,
+        parseInt(seatNumber)
+    );
+
+    return res.status(201).json(new ApiResponse(201, createdSeats, "Seats created successfully"));
 });
 
-const verifySeatStatus = async (seatids: string[]) => {
-    const seats = await prisma.seat.findMany({
-        where: {
-            publicId: { in: seatids }
-        }
-        , select: {
-            publicId: true,
-            status: true
-        }
-    })
-    const unavailableSeats = seats.filter(seat => seat.status !== "AVAILABLE").map(seat => seat.publicId);
-    if (unavailableSeats.length > 0) {
-        throw new ApiError(400, `The following seats are not available: ${unavailableSeats.join(", ")}`);
+const getRoundSeats = asyncHandler(async (req: any, res: any) => {
+    const { roundId } = req.params;
 
+    if (!roundId) {
+        throw new ApiError(400, "roundId is required");
     }
-    return seats
-}
+
+    const round = await prisma.poolRound.findUnique({
+        where: { publicId: roundId },
+        select: { id: true }
+    });
+
+    if (!round) {
+        throw new ApiError(404, "Round not found");
+    }
+
+    const seats = await prisma.seat.findMany({
+        where: { roundId: round.id },
+        select: {
+            publicId: true,
+            name: true,
+            status: true,
+            bookingId: true
+        },
+        orderBy: { name: "asc" }
+    });
+
+    return res.status(200).json(new ApiResponse(200, seats, "Seats retrieved successfully"));
+});
 
 const getSeatDetailsByIDForAdmin = asyncHandler(async (req: any, res: any) => {
     const { seatid } = req.params;
@@ -153,26 +133,33 @@ const getSeatDetailsByIDForAdmin = asyncHandler(async (req: any, res: any) => {
     }
 
     const seat = await prisma.seat.findUnique({
-        where: {
-            publicId: seatid
-        }
-        ,select:{
-            name:true,
-            status:true,
-            booking:{
-                select:{
-                    amount:true,
-                    providerPaymentId:true,
-                    status:true,
-                    seats:{
-                            select:{name:true,
-                            publicId:true
-                            }
+        where: { publicId: seatid },
+        select: {
+            publicId: true,
+            name: true,
+            status: true,
+            round: {
+                select: {
+                    publicId: true,
+                    roundNumber: true
+                }
+            },
+            booking: {
+                select: {
+                    id: true,
+                    amount: true,
+                    providerOrderId: true,
+                    status: true,
+                    seats: {
+                        select: {
+                            name: true,
+                            publicId: true
+                        }
                     },
-                    user:{
-                        select:{
-                            name:true,
-                            phone:true
+                    user: {
+                        select: {
+                            name: true,
+                            phone: true
                         }
                     }
                 }
@@ -180,13 +167,9 @@ const getSeatDetailsByIDForAdmin = asyncHandler(async (req: any, res: any) => {
         }
     });
 
-    if(!seat){
+    if (!seat) {
         throw new ApiError(404, "Seat not found");
     }
-    
-
-    
-    // Convert BigInt phone to string for JSON serialization
 
     const seatwithStringPhone = {
         ...seat,
@@ -199,42 +182,61 @@ const getSeatDetailsByIDForAdmin = asyncHandler(async (req: any, res: any) => {
         } : undefined
     };
 
-
     res.status(200).json(new ApiResponse(200, seatwithStringPhone, "Seat details retrieved successfully"));
+});
 
-
-
-})
-
-
-
-const updateSeatStatus = async(bookingId: string, Bookingstatus: string)=>{
-
-    let FinalSeatStatus;
-
-switch (Bookingstatus) {
-    case bookingStatus.COMPLETED:
-        
-    FinalSeatStatus = seatStatus.SOLD
-        break;
-    case bookingStatus.FAILED:
-    FinalSeatStatus = seatStatus.AVAILABLE
-        break;
-    default:
-    FinalSeatStatus = seatStatus.AVAILABLE
-        break;
-}
-
-    const updatedSeats = await prisma.seat.updateMany({
+const verifySeatStatus = async (seatids: string[]) => {
+    const seats = await prisma.seat.findMany({
         where: {
-            bookingId: bookingId
+            publicId: { in: seatids }
         },
-        data: {
-            status: FinalSeatStatus
+        select: {
+            publicId: true,
+            status: true
         }
     });
+
+    const unavailableSeats = seats.filter(seat => seat.status !== SeatStatus.AVAILABLE).map(seat => seat.publicId);
+    if (unavailableSeats.length > 0) {
+        throw new ApiError(400, `The following seats are not available: ${unavailableSeats.join(", ")}`);
+    }
+
+    return seats;
+};
+
+const updateSeatStatus = async (bookingId: string, bookingStatus: string, tx: any = prisma) => {
+    let finalSeatStatus: SeatStatus;
+
+    switch (bookingStatus) {
+        case BookingStatus.COMPLETED:
+            finalSeatStatus = SeatStatus.SOLD;
+            break;
+        case BookingStatus.FAILED:
+            finalSeatStatus = SeatStatus.AVAILABLE;
+            break;
+        case BookingStatus.EXPIRED:
+            finalSeatStatus = SeatStatus.AVAILABLE;
+            break;
+        case BookingStatus.CANCELLED:
+            finalSeatStatus = SeatStatus.AVAILABLE;
+            break;
+        default:
+            finalSeatStatus = SeatStatus.AVAILABLE;
+            break;
+    }
+
+    const updatedSeats = await tx.seat.updateMany({
+        where: { bookingId: bookingId },
+        data: { status: finalSeatStatus }
+    });
+
     return updatedSeats;
+};
 
-}
-
-export { createSeatsforPool, getPoolSeats, verifySeatStatus ,getSeatDetailsByIDForAdmin,updateSeatStatus}
+export { 
+    createSeatsforRound, 
+    getRoundSeats, 
+    verifySeatStatus, 
+    getSeatDetailsByIDForAdmin, 
+    updateSeatStatus 
+};

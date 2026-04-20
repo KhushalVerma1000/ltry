@@ -1,153 +1,372 @@
-import { seatStatus, type Pool } from "../db/generated/prisma/client.js";
+import { SeatStatus, RoundStatus, type Pool, type PoolRound } from "../db/generated/prisma/client.js";
 import { prisma } from "../db/index.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { createSeatsforPoolHelper } from "./seats.controllers.js";
-
-// const getAllPools = asyncHandler(async (req: any, res: any) => {
-//     const pools: Pool[] = await prisma.pool.findMany({
-//         include:{
-//           _count:{
-//             select:{
-//                 seats:{
-//                     where:{
-//                         status:seatStatus.AVAILABLE
-//                     }
-//                 }
-//             }
-//           }
-//            }
-
-//         }
-
-//     )
-
-//     return res.status(200).json(new ApiResponse(200, pools, "Pools fetched successfully"));
-// })
+import { createSeatsforRoundHelper } from "./seats.controllers.js";
 
 const getAllPools = asyncHandler(async (req: any, res: any) => {
-  const poolsD = await prisma.pool.findMany({
+  const pools = await prisma.pool.findMany({
     select: {
       publicId: true,
       name: true,
       perSeatPrice: true,
       totalSeats: true,
-      _count: {
+      notes: true,
+      rounds: {
+        where: { status: RoundStatus.ACTIVE },
+        take: 1,
         select: {
-          seats: {
-            where: {
-              status: seatStatus.AVAILABLE,
-            },
-          },
-        },
-      },
-    },
+          publicId: true,
+          status: true,
+          startsAt: true,
+          endsAt: true,
+          _count: {
+            select: {
+              seats: {
+                where: { status: SeatStatus.AVAILABLE }
+              }
+            }
+          }
+        }
+      }
+    }
   });
 
-  const pools = poolsD.map((pool) => ({
+  const formattedPools = pools.map((pool) => ({
     publicId: pool.publicId,
     name: pool.name,
     perSeatPrice: pool.perSeatPrice,
     totalSeats: pool.totalSeats,
-    availableSeats: pool._count.seats,
+    notes: pool.notes,
+    activeRound: pool.rounds[0] ? {
+      publicId: pool.rounds[0].publicId,
+      status: pool.rounds[0].status,
+      startsAt: pool.rounds[0].startsAt,
+      endsAt: pool.rounds[0].endsAt,
+      availableSeats: pool.rounds[0]._count.seats
+    } : null
   }));
+
   return res
     .status(200)
-    .json(new ApiResponse(200, pools, "Pools fetched successfully"));
+    .json(new ApiResponse(200, formattedPools, "Pools fetched successfully"));
 });
 
 const getPoolById = asyncHandler(async (req: any, res: any) => {
   const poolId = req.params.publicId;
-  const pool: Pool | null = await req.prisma.pool.findUnique({
-    where: { publicId: poolId },
-  });
-
-  if (!pool) {
-    return new ApiError(404, "Pool not found");
-  }
-  return res
-    .status(201)
-    .json(new ApiResponse(200, pool, "Pool fetched successfully"));
-});
-
-const getPoolWithDetailsById = asyncHandler(async (req: any, res: any) => {
-  const poolId = req.params.publicId;
   const pool = await prisma.pool.findUnique({
     where: { publicId: poolId },
-    include: {
-      seats: true,
-    },
+    select: {
+      publicId: true,
+      name: true,
+      perSeatPrice: true,
+      totalSeats: true,
+      notes: true,
+      rounds: {
+        orderBy: { roundNumber: "desc" },
+        take: 5,
+        select: {
+          publicId: true,
+          roundNumber: true,
+          status: true,
+          startsAt: true,
+          endsAt: true
+        }
+      }
+    }
   });
 
   if (!pool) {
     throw new ApiError(404, "Pool not found");
   }
- 
-  
+
   return res
-    .status(201)
-    .json(new ApiResponse(200, pool, "Pool fetched with details successfully"));
+    .status(200)
+    .json(new ApiResponse(200, pool, "Pool fetched successfully"));
+});
+
+const getPoolRounds = asyncHandler(async (req: any, res: any) => {
+  const poolId = req.params.publicId;
+  
+  const pool = await prisma.pool.findUnique({
+    where: { publicId: poolId },
+    select: { id: true }
+  });
+
+  if (!pool) {
+    throw new ApiError(404, "Pool not found");
+  }
+
+  const rounds = await prisma.poolRound.findMany({
+    where: { poolId: pool.id },
+    orderBy: { roundNumber: "desc" },
+    select: {
+      publicId: true,
+      roundNumber: true,
+      status: true,
+      startsAt: true,
+      endsAt: true,
+      priceSnapshot: true,
+      seatsSnapshot: true,
+      drawnAt: true,
+      _count: {
+        select: {
+          seats: {
+            where: { status: SeatStatus.AVAILABLE }
+          },
+          bookings: true,
+          winners: true
+        }
+      }
+    }
+  });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, rounds, "Rounds fetched successfully"));
 });
 
 const createPool = asyncHandler(async (req: any, res: any) => {
-  const { name, perSeatPrice, totalSeats } = req.body;
+  const { name, perSeatPrice, totalSeats, notes } = req.body;
+  
   if (!name || !perSeatPrice || !totalSeats) {
     throw new ApiError(400, "Name, perSeatPrice and totalSeats are required");
   }
 
-
-
-
-  // const newpoolD = await prisma.transaction(async (tx) => {
-
-
-  // })
-  const newPool: Pool = await prisma.pool.create({
+  const newPool = await prisma.pool.create({
     data: {
       name: name.toLowerCase(),
-      perSeatPrice: perSeatPrice,
+      perSeatPrice: parseFloat(perSeatPrice),
       totalSeats: parseInt(totalSeats),
+      notes: notes || null
     },
+    select: {
+      publicId: true,
+      name: true,
+      perSeatPrice: true,
+      totalSeats: true,
+      notes: true,
+      createdAt: true
+    }
   });
-
-  // creating seats for pool
-  const seats = await createSeatsforPoolHelper(
-    newPool.id,
-
-    parseInt(totalSeats)
-  );
-  if (!seats) {
-    throw new ApiError(500, "Failed to create seats for the pool");
-  }
 
   return res
     .status(201)
-    .json(
-      new ApiResponse(201, { ...newPool, seats }, "Pool created successfully")
+    .json(new ApiResponse(201, newPool, "Pool created successfully"));
+});
+
+const createPoolRound = asyncHandler(async (req: any, res: any) => {
+  const poolId = req.params.publicId;
+  const { roundNumber, startsAt, endsAt } = req.body;
+
+  if (!roundNumber || !startsAt || !endsAt) {
+    throw new ApiError(400, "roundNumber, startsAt, and endsAt are required");
+  }
+
+  const pool = await prisma.pool.findUnique({
+    where: { publicId: poolId },
+    select: { id: true, perSeatPrice: true, totalSeats: true }
+  });
+
+  if (!pool) {
+    throw new ApiError(404, "Pool not found");
+  }
+
+  const newRound = await prisma.$transaction(async (tx) => {
+    // Check if round number already exists for this pool
+    const existingRound = await tx.poolRound.findUnique({
+      where: {
+        poolId_roundNumber: {
+          poolId: pool.id,
+          roundNumber: parseInt(roundNumber)
+        }
+      }
+    });
+
+    if (existingRound) {
+      throw new ApiError(400, "Round number already exists for this pool");
+    }
+    console.log("round does not exist ................ creating new")
+
+    // Create new round
+    const round = await tx.poolRound.create({
+      data: {
+        poolId: pool.id,
+        roundNumber: parseInt(roundNumber),
+        startsAt: new Date(startsAt).toISOString(),
+        endsAt: new Date(endsAt).toISOString(),
+        status: RoundStatus.UPCOMING,
+        priceSnapshot: pool.perSeatPrice,
+        seatsSnapshot: pool.totalSeats
+      },
+      select: {
+        id:true,
+        publicId: true,
+        roundNumber: true,
+        status: true,
+        startsAt: true,
+        endsAt: true,
+        priceSnapshot: true,
+        seatsSnapshot: true
+      }
+    });
+
+    if (!round) {
+      throw new ApiError(500, "Failed to create pool round",round);
+    }
+    // Create seats for the new round
+    const seats = await createSeatsforRoundHelper(
+      round.publicId,
+      pool.id,
+      round.id,
+      pool.totalSeats,
+      tx
     );
+
+    if (!seats) {
+      throw new ApiError(500, "Failed to create seats for the round");
+    }
+
+    return { round, seats };
+  });
+
+  return res
+    .status(201)
+    .json(new ApiResponse(201, newRound, "Pool round created successfully"));
+});
+
+const updatePool = asyncHandler(async (req: any, res: any) => {
+  const poolId = req.params.publicId;
+  const { name, perSeatPrice, totalSeats, notes } = req.body;
+
+  const updateData: Record<string, any> = {};
+
+  if (name !== undefined) updateData.name = name.toLowerCase();
+  if (perSeatPrice !== undefined) updateData.perSeatPrice = parseFloat(perSeatPrice);
+  if (totalSeats !== undefined) updateData.totalSeats = parseInt(totalSeats);
+  if (notes !== undefined) updateData.notes = notes;
+
+  if (Object.keys(updateData).length === 0) {
+    return res.status(400).json(new ApiResponse(400, null, "No fields to update"));
+  }
+
+  const pool = await prisma.pool.update({
+    where: { publicId: poolId },
+    data: updateData,
+    select: {
+      publicId: true,
+      name: true,
+      perSeatPrice: true,
+      totalSeats: true,
+      notes: true,
+      updatedAt: true
+    }
+  });
+
+  if (!pool) {
+    throw new ApiError(404, "Pool not found");
+  }
+
+  return res.status(200).json(new ApiResponse(200, pool, "Pool updated successfully"));
+});
+
+const updateRoundStatus = asyncHandler(async (req: any, res: any) => {
+  const { poolId, roundId } = req.params;
+  const { status } = req.body;
+
+  if (!status || !Object.values(RoundStatus).includes(status)) {
+    throw new ApiError(400, "Valid status is required (UPCOMING, ACTIVE, DRAWING, CLOSED, CANCELLED)");
+  }
+
+  const pool = await prisma.pool.findUnique({
+    where: { publicId: poolId },
+    select: { id: true }
+  });
+
+  if (!pool) {
+    throw new ApiError(404, "Pool not found");
+  }
+
+  const round = await prisma.poolRound.update({
+    where: { publicId: roundId },
+    data: { status },
+    select: {
+      publicId: true,
+      roundNumber: true,
+      status: true,
+      startsAt: true,
+      endsAt: true
+    }
+  });
+
+  return res.status(200).json(new ApiResponse(200, round, "Round status updated successfully"));
 });
 
 const deletePool = asyncHandler(async (req: any, res: any) => {
   const poolId = req.params.publicId;
-  const deletedPool = await prisma.pool.delete(
-    {
-      where: { publicId: poolId },
+  
+  const deletedPool = await prisma.pool.delete({
+    where: { publicId: poolId },
+    select: {
+      publicId: true,
+      name: true
     }
-    // Seats associated with the pool will be automatically deleted due to the cascade delete rule defined in the Prisma schema. This ensures that there are no orphaned seat records when a pool is deleted.,
-  );
+  });
 
   if (!deletedPool) {
     throw new ApiError(404, "Pool not found");
   }
+
   return res
     .status(200)
     .json(new ApiResponse(200, deletedPool, "Pool deleted successfully"));
 });
+
+const resetRound = asyncHandler(async (req: any, res: any) => {
+  const { poolId, roundId } = req.params;
+
+  const pool = await prisma.pool.findUnique({
+    where: { publicId: poolId },
+    select: { id: true }
+  });
+
+  if (!pool) {
+    throw new ApiError(404, "Pool not found");
+  }
+
+  const round = await prisma.poolRound.findUnique({
+    where: { publicId: roundId },
+    select: { id: true }
+  });
+
+  if (!round) {
+    throw new ApiError(404, "Round not found");
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const updatedSeats = await tx.seat.updateMany({
+      where: { roundId: round.id },
+      data: {
+        bookingId: null,
+        status: SeatStatus.AVAILABLE
+      }
+    });
+
+    return updatedSeats;
+  });
+
+  return res.status(200).json(new ApiResponse(200, result, "Round bookings cleared successfully"));
+});
+
 export {
   getAllPools,
   getPoolById,
+  getPoolRounds,
   createPool,
-  deletePool,
-  getPoolWithDetailsById,
+  createPoolRound,
+  updatePool,
+  updateRoundStatus,
+  resetRound,
+  deletePool
 };

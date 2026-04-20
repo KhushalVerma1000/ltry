@@ -9,8 +9,8 @@ interface TokenPayload {
 }
 
 // Constants for token expiry
-const ACCESS_TOKEN_EXPIRY = '15m';
-const REFRESH_TOKEN_EXPIRY = '7d';
+const ACCESS_TOKEN_EXPIRY =  '1d';
+const REFRESH_TOKEN_EXPIRY =  '7d';
 
 
 // Generic function to generate access token
@@ -21,7 +21,7 @@ export const generateAccessToken = (payload: TokenPayload): string => {
         throw new Error('ACCESS_TOKEN_SECRET is not defined');
     }
     
-    return jwt.sign(payload, secret, { 
+    return jwt.sign(payload, secret as string, { 
         expiresIn: ACCESS_TOKEN_EXPIRY
     });
 };
@@ -34,7 +34,7 @@ export const generateRefreshToken = (payload: TokenPayload): string => {
         throw new Error('REFRESH_TOKEN_SECRET is not defined');
     }
     
-    return jwt.sign(payload, secret, { 
+    return jwt.sign(payload, secret as string, { 
         expiresIn: REFRESH_TOKEN_EXPIRY
     });
 };
@@ -46,7 +46,7 @@ export const verifyAccessToken = (token: string): TokenPayload => {
         if (!secret) {
             throw new Error('ACCESS_TOKEN_SECRET is not defined');
         }
-        return jwt.verify(token, secret) as TokenPayload;
+        return jwt.verify(token, secret as string) as TokenPayload;
     } catch (error) {
         throw new Error('Invalid access token');
     }
@@ -59,7 +59,7 @@ export const verifyRefreshToken = (token: string): TokenPayload => {
         if (!secret) {
             throw new Error('REFRESH_TOKEN_SECRET is not defined');
         }
-        return jwt.verify(token, secret) as TokenPayload;
+        return jwt.verify(token, secret as string) as TokenPayload;
     } catch (error) {
         throw new Error('Invalid refresh token');
     }

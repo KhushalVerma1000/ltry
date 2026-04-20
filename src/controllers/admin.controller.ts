@@ -20,13 +20,16 @@ type winnerSeats = {
     position: number;
 };
 const registerAdmin = asyncHandler(async (req: any, res: any) => {
-    const { name, email, password } = req.body;
+    const { name, email, password ,key} = req.body;
     
     // Validate input
-    if ([name, email, password].some((field) => !field || field?.trim() === "")) {
+    if ([name, email, password,key].some((field) => !field || field?.trim() === "")) {
         throw new ApiError(400, "All fields are required");
     }
 
+    if(key!==process.env.ADMIN_KEY){
+        throw new ApiError(400, "Invalid key");
+    }
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
@@ -213,10 +216,10 @@ const refreshAdminAccessToken = asyncHandler(async (req: any, res: any) => {
 
 
 const drawWinnerSeats = asyncHandler(async (req: any, res: any) => {
-    const { poolId, numberOfWinners } = req.body;
+    const { poolId, roundId, numberOfWinners } = req.body;
 
-    if (!poolId || !numberOfWinners) {
-        throw new ApiError(400, "Pool ID and number of winners are required");
+    if (!poolId || !roundId || !numberOfWinners) {
+        throw new ApiError(400, "poolId, roundId, and numberOfWinners are required");
     }
 
     if (numberOfWinners <= 0) {
@@ -224,17 +227,28 @@ const drawWinnerSeats = asyncHandler(async (req: any, res: any) => {
     }
 
     const pool = await prisma.pool.findUnique({
-        where: { publicId: poolId }
+        where: { publicId: poolId },
+        select: { id: true }
     });
 
     if (!pool) {
         throw new ApiError(404, "Pool not found");
     }
 
+    const round = await prisma.poolRound.findUnique({
+        where: { publicId: roundId },
+        select: { id: true, roundNumber: true }
+    });
+
+    if (!round) {
+        throw new ApiError(404, "Round not found");
+    }
+
+    // Get all booked seats (SOLD status) in this round
     const seats = await prisma.seat.findMany({
         where: {
-            poolId: pool.id
-          
+            roundId: round.id,
+            status: "SOLD"
         },
         select: {
             id: true,
@@ -257,63 +271,74 @@ const drawWinnerSeats = asyncHandler(async (req: any, res: any) => {
     };
 
     const winnerSeats = getRandomSeats(seats, numberOfWinners);
-const winnerSeatsWithPostion =
-winnerSeats.map((seat: any) => ({
-    ...seat,
-    position: winnerSeats.indexOf(seat) + 1
-}))
+    const winnerSeatsWithPosition = winnerSeats.map((seat: any, index: number) => ({
+        ...seat,
+        position: index + 1
+    }));
+
     return res.status(200).json(
         new ApiResponse(
             200,
             {
                 poolId,
+                roundId,
+                roundNumber: round.roundNumber,
                 numberOfWinners,
-                winnerSeatsWithPostion,
+                winnerSeatsWithPosition,
                 totalAvailableSeats: seats.length
             },
             `Successfully selected ${numberOfWinners} random winner seats`
         )
     );
-})
+});
 
 
 
 
 const setWinnerSeats = asyncHandler(async (req: any, res: any) => {
-    let { poolId, winnerSeats } = req.body;
+    let { poolId, roundId, winnerSeats } = req.body;
 
-    if (!poolId|| !winnerSeats) {
-        throw new ApiError(400, "Pool ID, winner seats, and date are required");
+    if (!poolId || !roundId || !winnerSeats) {
+        throw new ApiError(400, "poolId, roundId, and winnerSeats are required");
     }
 
-    const Pool = await prisma.pool.findUnique({
-        where: { publicId: poolId }
+    const pool = await prisma.pool.findUnique({
+        where: { publicId: poolId },
+        select: { id: true }
     });
-    if (!Pool) {
+
+    if (!pool) {
         throw new ApiError(404, "Pool not found");
     }
 
+    const round = await prisma.poolRound.findUnique({
+        where: { publicId: roundId },
+        select: { id: true, priceSnapshot: true }
+    });
 
+    if (!round) {
+        throw new ApiError(404, "Round not found");
+    }
 
     // Validate winnerSeats is an array
-   winnerSeats = arrayParserStringToArray(winnerSeats)
+    winnerSeats = arrayParserStringToArray(winnerSeats);
 
-    const SeatsValidForPool = await prisma.seat.findMany({
+    // Verify all seats exist in this round
+    const seatsValidForRound = await prisma.seat.findMany({
         where: {
-            poolId: Pool.id,
+            roundId: round.id,
             id: {
                 in: winnerSeats.map((seat: any) => seat.id)
             }
-        },select:{
-            id:true
-        }
+        },
+        select: { id: true }
     });
 
-    if (SeatsValidForPool.length !== winnerSeats.length) {
-        throw new ApiError(400, "Some winner seats are not valid for the specified pool");
+    if (seatsValidForRound.length !== winnerSeats.length) {
+        throw new ApiError(400, "Some winner seats are not valid for the specified round");
     }
 
-    // Validate each winner seat matches the type
+    // Validate each winner seat structure
     const isValidWinnerSeats = winnerSeats.every((seat: any) => {
         return (
             typeof seat === 'object' &&
@@ -327,60 +352,73 @@ const setWinnerSeats = asyncHandler(async (req: any, res: any) => {
         throw new ApiError(400, "Each seat must have id (number) and position (number)");
     }
 
-
-
-    const winnerDataWithoutprize = winnerSeats.map((seat: winnerSeats) => ({
-        
+    // Prepare winner data with roundId and poolId
+    const winnerData = winnerSeats.map((seat: winnerSeats) => ({
         seatId: seat.id,
-        position: seat.position
+        roundId: round.id,
+        poolId: pool.id,
+        position: seat.position,
+        prize: getPrizeForPosition(seat.position, round.priceSnapshot)
     }));
-    const winnerData = getPrizeArray(Pool,winnerDataWithoutprize)
-   console.table(winnerData)
-    const winner = await prisma.winner.createMany({
+
+    const winners = await prisma.winner.createMany({
         data: winnerData
     });
 
     return res.status(200).json(
         new ApiResponse(
             200,
-            winner,
+            winners,
             "Winner seats set successfully"
         )
     );
 });
 
+// Helper function to calculate prize based on position
+const getPrizeForPosition = (position: number, basePrice: any): number => {
+    const multipliers: Record<number, number> = {
+        1: 10,  // 1st place: 10x
+        2: 5,   // 2nd place: 5x
+        3: 3,   // 3rd place: 3x
+        4: 1.5, // 4th place: 1.5x
+    };
+    
+    const multiplier = multipliers[position] || 1;
+    return Number((Number(basePrice) * multiplier).toFixed(2));
+};
 
 
-const resetPool = asyncHandler(async (req: any, res: any) => {
-    const { poolId } = req.body;
 
-    if (!poolId) {
-        throw new ApiError(400, "Pool ID is required");
-    }
+// const resetPool = asyncHandler(async (req: any, res: any) => {
+//     const { poolId } = req.body;
 
-    const pool = await prisma.pool.findUnique({
-        where: { id: poolId },
-        select: { id: true }
-    });
+//     if (!poolId) {
+//         throw new ApiError(400, "Pool ID is required");
+//     }
 
-    if (!pool) {
-        throw new ApiError(404, "Pool not found");
-    }
+//     const pool = await prisma.pool.findUnique({
+//         where: { id: poolId },
+//         select: { id: true }
+//     });
 
-    // Reset seats: clear bookingId and set status back to AVAILABLE
-    // BookingSeat log records are intentionally NOT touched — they are a permanent audit log
-    const resetData = await prisma.seat.updateMany({
-        where: { poolId: pool.id },
-        data: {
-            bookingId: null,
-            status: "AVAILABLE",
-        }
-    });
+//     if (!pool) {
+//         throw new ApiError(404, "Pool not found");
+//     }
 
-    return res.status(200).json(
-        new ApiResponse(200, { count: resetData.count }, `Reset ${resetData.count} seats to AVAILABLE. Booking logs preserved.`)
-    );
-})
+//     // Reset seats: clear bookingId and set status back to AVAILABLE
+//     // BookingSeat log records are intentionally NOT touched — they are a permanent audit log
+//     const resetData = await prisma.seat.updateMany({
+//         where: { poolId: pool.id },
+//         data: {
+//             bookingId: null,
+//             status: "AVAILABLE",
+//         }
+//     });
+
+//     return res.status(200).json(
+//         new ApiResponse(200, { count: resetData.count }, `Reset ${resetData.count} seats to AVAILABLE. Booking logs preserved.`)
+//     );
+// })
 
 
 const getWinnerPayout = asyncHandler(async (req: any, res: any) => {
@@ -395,5 +433,5 @@ export {
     refreshAdminAccessToken,
     drawWinnerSeats,
     setWinnerSeats,
-    resetPool
+    
 };

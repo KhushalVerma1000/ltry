@@ -4,17 +4,18 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { prisma } from "../db/index.js";
 import { passwordHash, comparePassword } from "../utils/autherisationHelper.js";
 import { generateUserTokens } from "../utils/tokenHelper.js";
+import { createPaginationHelper } from "../utils/paginationHelper.js";
 
 
-  const cookieOptions ={
-        httponl:true,
-        secure:true
-    }
+const cookieOptions = {
+    httponl: true,
+    secure: true
+}
 const registerUser = asyncHandler(async (req: any, res: any) => {
-    const { name, phone, password } = req.body;
-    
+    const { name, phone, password, bankAccountNumber, bankIFSCCode, upiId } = req.body;
+
     // Validate input
-    if ([name, phone, password].some((field) => !field || field?.trim() === "")) {
+    if ([name, phone, password, bankAccountNumber, bankIFSCCode, upiId].some((field) => !field || field?.trim() === "")) {
         throw new ApiError(400, "All fields are required");
     }
 
@@ -27,7 +28,7 @@ const registerUser = asyncHandler(async (req: any, res: any) => {
     const existedUser = await prisma.user.findFirst({
         where: { phone: phone }
     });
-    
+
     if (existedUser) {
         throw new ApiError(409, "User with this phone already exists");
     }
@@ -41,6 +42,7 @@ const registerUser = asyncHandler(async (req: any, res: any) => {
             name: name.toLowerCase(),
             phone: phone,
             password: hashedPassword
+            , bankAccountNumber, bankIFSCCode, upiId
         },
         select: {
             id: true,
@@ -48,7 +50,10 @@ const registerUser = asyncHandler(async (req: any, res: any) => {
             name: true,
             phone: true,
             createdAt: true,
-            updatedAt: true
+            updatedAt: true,
+            bankAccountNumber: true,
+            bankIFSCCode: true,
+            upiId: true
         }
     });
 
@@ -63,22 +68,22 @@ const registerUser = asyncHandler(async (req: any, res: any) => {
 
     // Send response
     return res.status(201)
-    .cookie("refreshToken", refreshToken, cookieOptions)
-    .cookie("accessToken", accessToken, cookieOptions)
-    .json(
-        new ApiResponse(
-            201,
-            {
-                user: {
-                    ...newUser,
-                    phone: newUser.phone.toString()
+        .cookie("refreshToken", refreshToken, cookieOptions)
+        .cookie("accessToken", accessToken, cookieOptions)
+        .json(
+            new ApiResponse(
+                201,
+                {
+                    user: {
+                        ...newUser,
+                        phone: newUser.phone.toString()
+                    },
+                    accessToken,
+                    refreshToken
                 },
-                accessToken,
-                refreshToken
-            },
-            "User registered successfully"
-        )
-    );
+                "User registered successfully"
+            )
+        );
 });
 
 
@@ -99,7 +104,7 @@ const loginUser = asyncHandler(async (req: any, res: any) => {
     }
 
     const isPasswordValid = await comparePassword(password, user.password);
-    
+
     if (!isPasswordValid) {
         throw new ApiError(401, "Invalid credentials");
     }
@@ -115,25 +120,25 @@ const loginUser = asyncHandler(async (req: any, res: any) => {
 
     const { password: _, refreshToken: __, ...userWithoutSensitiveData } = user;
 
-  
+
 
 
     return res.status(200).cookie("refreshToken", refreshToken, cookieOptions)
-    .cookie("accessToken", accessToken, cookieOptions)
-    .json(
-        new ApiResponse(
-            200,
-            {
-                user: {
-                    ...userWithoutSensitiveData,
-                    phone: userWithoutSensitiveData.phone.toString()
+        .cookie("accessToken", accessToken, cookieOptions)
+        .json(
+            new ApiResponse(
+                200,
+                {
+                    user: {
+                        ...userWithoutSensitiveData,
+                        phone: userWithoutSensitiveData.phone.toString()
+                    },
+                    accessToken,
+                    refreshToken
                 },
-                accessToken,
-                refreshToken
-            },
-            "Login successful"
-        )
-    );
+                "Login successful"
+            )
+        );
 });
 
 const logoutUser = asyncHandler(async (req: any, res: any) => {
@@ -149,22 +154,22 @@ const logoutUser = asyncHandler(async (req: any, res: any) => {
     });
 
     return res.status(200)
-    .clearCookie("refreshToken", cookieOptions)
-    .clearCookie("accessToken", cookieOptions)
-    .json(
-        new ApiResponse(200, {}, "Logout successful")
-    );
+        .clearCookie("refreshToken", cookieOptions)
+        .clearCookie("accessToken", cookieOptions)
+        .json(
+            new ApiResponse(200, {}, "Logout successful")
+        );
 });
 
 const refreshAccessToken = asyncHandler(async (req: any, res: any) => {
-    const { refreshToken } = req.cookies.refreshToken || req.body;
+    const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken || req.headers["x-refresh-token"];
 
-    if (!refreshToken) {
+    if (!incomingRefreshToken) {
         throw new ApiError(400, "Refresh token is required");
     }
 
     const user = await prisma.user.findFirst({
-        where: { refreshToken: refreshToken }
+        where: { refreshToken: incomingRefreshToken }
     });
 
     if (!user) {
@@ -194,39 +199,70 @@ const getcurrentUser = asyncHandler(async (req: any, res: any) => {
     const userId = req.user?.id;
     if (!userId) {
         throw new ApiError(401, "Unauthorized");
-    }})
-
-
-    
-    const getCurrentSeatsOfUser = asyncHandler(async (req: any, res: any) => {
-    const userId = req.user?.id;
-        
-        if (!userId) { throw new ApiError(401, "Unauthorized");}
-
-    const bookings = await prisma.booking.findMany({
-        where: { userId: userId },
-        include:{
-            seats:{
-                select:{
-                    name:true,
-                    publicId:true
-                }
-            }
-        }
-
-    })
-    
-    return res.status(200).json(new ApiResponse(200, bookings, "User's current bookings retrieved successfully"));
-
+    }
 })
 
 
 
-export { 
-    registerUser, 
-    loginUser, 
-    logoutUser, 
-    refreshAccessToken ,
+const getCurrentSeatsOfUser = asyncHandler(async (req: any, res: any) => {
+    const userId = req.user?.id;
+
+    if (!userId) { throw new ApiError(401, "Unauthorized"); }
+
+    const paginationHelper = createPaginationHelper(req.query.page, req.query.limit);
+
+    const [bookings, total] = await Promise.all([
+        prisma.booking.findMany({
+            where: { userId: userId },
+            skip: paginationHelper.skip,
+            take: paginationHelper.take,
+            include: {
+                bookedSeats: {
+                    select: {
+                        seatName: true,
+                        seat: {
+                            select: {
+                                publicId: true,
+                                round: {
+                                    select: {
+                                        roundNumber: true,
+                                        publicId: true,
+                                        status: true,
+                                        pool: {
+                                            select: {
+                                                name: true,
+                                                publicId: true
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }),
+        prisma.booking.count({
+            where: { userId: userId }
+        })
+    ]);
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            paginationHelper.format(bookings, total),
+            "User's current bookings retrieved successfully"
+        )
+    );
+})
+
+
+
+export {
+    registerUser,
+    loginUser,
+    logoutUser,
+    refreshAccessToken,
     getcurrentUser,
     getCurrentSeatsOfUser
 };

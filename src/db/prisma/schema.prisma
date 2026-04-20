@@ -12,7 +12,7 @@ model AdminUser {
   name         String
   email        String   @unique
   password     String
-  refreshToken String
+  refreshToken String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -24,97 +24,164 @@ model User {
   name              String
   phone             String    @unique
   password          String
-  bankAccountNumber String?
-  bankIFSCCode      String?
-  upiId             String?
-  refreshToken      String?
+  bankAccountNumber String
+  bankIFSCCode      String
+  upiId             String
+  refreshToken      String
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   bookings          Booking[]
 }
 
 model Pool {
-  id           Int      @id @default(autoincrement())
+  id           Int         @id @default(autoincrement())
+  publicId     String      @unique @default(cuid())
   name         String
-  perSeatPrice Decimal  @db.Decimal(10, 2)
+  perSeatPrice Decimal     @db.Decimal(10, 2)
   totalSeats   Int
-  publicId     String   @unique @default(cuid())
-  validFromDate DateTime  @default(now())
-  validToDate   DateTime  @default(now())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  seats        Seat[]
-  winners      Winner[]
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  rounds       PoolRound[]
 }
 
-model BookingSeat {
-  id        Int      @id @default(autoincrement())
-  bookingId String
-  seatId    Int
-  seatName  String   // snapshot — in case seat is deleted later
-  poolId    Int      // snapshot
-  createdAt DateTime @default(now())
+model PoolRound {
+  id            Int         @id @default(autoincrement())
+  publicId      String      @unique @default(cuid())
+  poolId        Int
+  roundNumber   Int
+  status        RoundStatus @default(UPCOMING)
+  startsAt      DateTime
+  endsAt        DateTime
+  drawnAt       DateTime?
+  priceSnapshot Decimal     @db.Decimal(10, 2)
+  seatsSnapshot Int
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  pool          Pool        @relation(fields: [poolId], references: [id], onDelete: Restrict)
+  seats         Seat[]
+  bookings      Booking[]
+  winners       Winner[]
 
-  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: NoAction)
-  seat      Seat     @relation(fields: [seatId], references: [id], onDelete: NoAction)
-
-  @@unique([bookingId, seatId])
-}
-model Booking {
-  id                String        @id @default(cuid())
-  amount            Decimal       @db.Decimal(10, 2)
-  providerPaymentId String?   @unique
-  status            bookingStatus @default(PENDING)
-  userId            Int
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  user              User          @relation(fields: [userId], references: [id], onDelete: NoAction)
-  seats             Seat[]        // keep for active/live relation
-  bookedSeats       BookingSeat[] // permanent log ✅
+  @@unique([poolId, roundNumber])
+  @@index([poolId, status])
 }
 
 model Seat {
-  id          Int          @id @default(autoincrement())
-  name        String       @unique
-  poolId      Int
-  status      seatStatus   @default(AVAILABLE)
-  bookingId   String?      
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  publicId    String       @unique @default(cuid())
-  booking     Booking?     @relation(fields: [bookingId], references: [id])
-  pool        Pool         @relation(fields: [poolId], references: [id], onDelete: Cascade)
-  winners     Winner[]
-  bookedSeats BookingSeat[] 
+  id        Int        @id @default(autoincrement())
+  publicId  String     @unique @default(cuid())
+  roundId   Int
+  poolId    Int
+  name      String
+  status    SeatStatus @default(AVAILABLE)
+  bookingId String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  round     PoolRound    @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  booking   Booking?     @relation(fields: [bookingId], references: [id])
+  bookedSeats BookingSeat[]
+  winners   Winner[]
+
+  @@unique([roundId, name])
+  @@index([roundId, status])
 }
 
+model Booking {
+  id              String        @id @default(cuid())
+  roundId         Int
+  userId          Int
+  amount          Decimal       @db.Decimal(10, 2)
+  status          BookingStatus @default(PENDING)
+  providerOrderId String?
+  tokenExpiresAt  DateTime
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  round           PoolRound     @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  user            User          @relation(fields: [userId], references: [id], onDelete: NoAction)
+  seats           Seat[]
+  bookedSeats     BookingSeat[]
+  transactions    Transaction[]
+
+  @@index([roundId, status])
+  @@index([userId])
+}
+
+model BookingSeat {
+  id             Int      @id @default(autoincrement())
+  bookingId      String
+  seatId         Int
+  roundId        Int
+  poolId         Int
+  seatName       String
+  priceAtBooking Decimal  @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
+  booking        Booking  @relation(fields: [bookingId], references: [id], onDelete: NoAction)
+  seat           Seat     @relation(fields: [seatId], references: [id], onDelete: NoAction)
+
+  @@unique([bookingId, seatId])
+  @@index([roundId])
+  @@index([poolId])
+}
 
 model Winner {
-  id        Int      @id @default(autoincrement())
-  date      DateTime @default(now())
+  id        Int       @id @default(autoincrement())
+  roundId   Int
+  poolId    Int
   seatId    Int
   position  Int
-  poolId    Int
-  prize     Decimal  @db.Decimal(10, 2)
-  paid Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  seat      Seat     @relation(fields: [seatId], references: [id], onDelete: NoAction)
-  pool      Pool     @relation(fields: [poolId], references: [id], onDelete: NoAction)
+  prize     Decimal   @db.Decimal(10, 2)
+  paid      Boolean   @default(false)
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  round     PoolRound @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  seat      Seat      @relation(fields: [seatId], references: [id], onDelete: NoAction)
+
+  @@unique([roundId, position])
+  @@index([roundId])
+  @@index([poolId])
 }
 
+model Transaction {
+  id                       String                   @id @default(cuid())
+  bookingId                String
+  paymentGateway           String
+  gatewayOrderId           String
+  gatewayPaymentId         String
+  transactionAttemptStatus TransactionAttemptStatus @default(PENDING)
+  amount                   Decimal                  @db.Decimal(10, 2)
+  error                    Json?
+  createdAt                DateTime                 @default(now())
+  booking                  Booking                  @relation(fields: [bookingId], references: [id], onDelete: NoAction)
 
+  @@index([bookingId])
+}
 
+enum RoundStatus {
+  UPCOMING
+  ACTIVE
+  DRAWING
+  CLOSED
+  CANCELLED
+}
 
-enum seatStatus {
+enum SeatStatus {
   AVAILABLE
   RESERVED
   SOLD
 }
 
-
-enum bookingStatus {
+enum BookingStatus {
   PENDING
   COMPLETED
   FAILED
+  EXPIRED
+  CANCELLED
+}
+
+enum TransactionAttemptStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  EXPIRED
 }
