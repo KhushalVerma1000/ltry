@@ -8,8 +8,8 @@ import { createPaginationHelper } from "../utils/paginationHelper.js";
 
 
 const cookieOptions = {
-    httponl: true,
-    secure: true
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production"
 }
 const registerUser = asyncHandler(async (req: any, res: any) => {
     const { name, phone, password, bankAccountNumber, bankIFSCCode, upiId } = req.body;
@@ -258,12 +258,55 @@ const getCurrentSeatsOfUser = asyncHandler(async (req: any, res: any) => {
 
 
 
+const getUserWinnings = asyncHandler(async (req: any, res: any) => {
+    const userId = req.user?.id;
+
+    if (!userId) {
+        throw new ApiError(401, "Unauthorized");
+    }
+
+    const winners = await prisma.winner.findMany({
+        where: {
+            seat: {
+                booking: {
+                    userId: userId
+                }
+            }
+        },
+        include: {
+            seat: {
+                select: {
+                    name: true,
+                    round: {
+                        select: {
+                            roundNumber: true,
+                            pool: {
+                                select: {
+                                    name: true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        orderBy: {
+            createdAt: "desc"
+        }
+    });
+
+    return res.status(200).json(
+        new ApiResponse(200, winners, "User winnings retrieved successfully")
+    );
+});
+
 export {
     registerUser,
     loginUser,
     logoutUser,
     refreshAccessToken,
     getcurrentUser,
-    getCurrentSeatsOfUser
+    getCurrentSeatsOfUser,
+    getUserWinnings
 };
 

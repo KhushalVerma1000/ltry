@@ -14,13 +14,16 @@ const getAllPools = asyncHandler(async (req: any, res: any) => {
       totalSeats: true,
       notes: true,
       rounds: {
-        where: { status: RoundStatus.ACTIVE },
+        where: { status: { in: [RoundStatus.ACTIVE, RoundStatus.DRAWING, RoundStatus.UPCOMING] } },
+        orderBy: { roundNumber: "desc" },
         take: 1,
         select: {
+          roundNumber:true,
           publicId: true,
           status: true,
           startsAt: true,
           endsAt: true,
+          drawnAt: true,
           _count: {
             select: {
               seats: {
@@ -40,10 +43,12 @@ const getAllPools = asyncHandler(async (req: any, res: any) => {
     totalSeats: pool.totalSeats,
     notes: pool.notes,
     activeRound: pool.rounds[0] ? {
+      roundNumber: pool.rounds[0].roundNumber,
       publicId: pool.rounds[0].publicId,
       status: pool.rounds[0].status,
       startsAt: pool.rounds[0].startsAt,
       endsAt: pool.rounds[0].endsAt,
+      drawnAt: pool.rounds[0].drawnAt,
       availableSeats: pool.rounds[0]._count.seats
     } : null
   }));
@@ -64,6 +69,7 @@ const getPoolById = asyncHandler(async (req: any, res: any) => {
       totalSeats: true,
       notes: true,
       rounds: {
+        where: { status: { in: [RoundStatus.ACTIVE, RoundStatus.DRAWING, RoundStatus.UPCOMING, RoundStatus.CLOSED] } },
         orderBy: { roundNumber: "desc" },
         take: 5,
         select: {
@@ -71,7 +77,8 @@ const getPoolById = asyncHandler(async (req: any, res: any) => {
           roundNumber: true,
           status: true,
           startsAt: true,
-          endsAt: true
+          endsAt: true,
+          drawnAt: true
         }
       }
     }
@@ -86,9 +93,63 @@ const getPoolById = asyncHandler(async (req: any, res: any) => {
     .json(new ApiResponse(200, pool, "Pool fetched successfully"));
 });
 
-const getPoolRounds = asyncHandler(async (req: any, res: any) => {
+const getAdminPoolRounds = asyncHandler(async (req: any, res: any) => {
   const poolId = req.params.publicId;
-  
+  const { startDate, endDate } = req.query;
+
+  const pool = await prisma.pool.findUnique({
+    where: { publicId: poolId },
+    select: { id: true }
+  });
+
+  if (!pool) {
+    throw new ApiError(404, "Pool not found");
+  }
+
+  const whereClause: any = { poolId: pool.id };
+
+  if (startDate || endDate) {
+    whereClause.endsAt = {};
+    if (startDate) {
+      whereClause.endsAt.gte = new Date(startDate);
+    }
+    if (endDate) {
+      whereClause.endsAt.lte = new Date(endDate);
+    }
+  }
+
+  const rounds = await prisma.poolRound.findMany({
+    where: whereClause,
+    orderBy: { roundNumber: "desc" },
+    select: {
+      publicId: true,
+      roundNumber: true,
+      status: true,
+      startsAt: true,
+      endsAt: true,
+      priceSnapshot: true,
+      seatsSnapshot: true,
+      drawnAt: true,
+      _count: {
+        select: {
+          seats: {
+            where: { status: SeatStatus.AVAILABLE }
+          },
+          bookings: true,
+          winners: true
+        }
+      }
+    }
+  });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, rounds, "Rounds fetched successfully"));
+});
+
+const getPublicPoolRounds = asyncHandler(async (req: any, res: any) => {
+  const poolId = req.params.publicId;
+
   const pool = await prisma.pool.findUnique({
     where: { publicId: poolId },
     select: { id: true }
@@ -99,7 +160,13 @@ const getPoolRounds = asyncHandler(async (req: any, res: any) => {
   }
 
   const rounds = await prisma.poolRound.findMany({
-    where: { poolId: pool.id },
+    where: { 
+      poolId: pool.id,
+      status: {
+        in: [RoundStatus.ACTIVE, RoundStatus.DRAWING, RoundStatus.UPCOMING]
+      }
+
+    },
     orderBy: { roundNumber: "desc" },
     select: {
       publicId: true,
@@ -273,10 +340,14 @@ const updatePool = asyncHandler(async (req: any, res: any) => {
 
 const updateRoundStatus = asyncHandler(async (req: any, res: any) => {
   const { poolId, roundId } = req.params;
-  const { status } = req.body;
+  const { status, drawnAt } = req.body;
 
   if (!status || !Object.values(RoundStatus).includes(status)) {
     throw new ApiError(400, "Valid status is required (UPCOMING, ACTIVE, DRAWING, CLOSED, CANCELLED)");
+  }
+
+  if (status === RoundStatus.DRAWING && !drawnAt) {
+    throw new ApiError(400, "drawnAt time is required when status is DRAWING");
   }
 
   const pool = await prisma.pool.findUnique({
@@ -288,15 +359,21 @@ const updateRoundStatus = asyncHandler(async (req: any, res: any) => {
     throw new ApiError(404, "Pool not found");
   }
 
+  const updateData: any = { status };
+  if (drawnAt) {
+    updateData.drawnAt = new Date(drawnAt).toISOString();
+  }
+
   const round = await prisma.poolRound.update({
     where: { publicId: roundId },
-    data: { status },
+    data: updateData,
     select: {
       publicId: true,
       roundNumber: true,
       status: true,
       startsAt: true,
-      endsAt: true
+      endsAt: true,
+      drawnAt: true
     }
   });
 
@@ -362,7 +439,8 @@ const resetRound = asyncHandler(async (req: any, res: any) => {
 export {
   getAllPools,
   getPoolById,
-  getPoolRounds,
+  getAdminPoolRounds,
+  getPublicPoolRounds,
   createPool,
   createPoolRound,
   updatePool,

@@ -15,7 +15,8 @@ const createBooking = asyncHandler(async (req: any, res: any) => {
         throw new ApiError(400, "roundId, amount, and seats are required");
     }
 
-    if (isNaN(amount) || amount <= 0) {
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
         throw new ApiError(400, "Invalid amount value");
     }
 
@@ -72,9 +73,9 @@ const createBooking = asyncHandler(async (req: any, res: any) => {
 
         // Calculate expected price based on priceSnapshot
         const expectedPrice = Number(round.priceSnapshot) * seatsBooked.length;
-        const receivedAmount = Number(amount);
+        const receivedAmount = parsedAmount;
 
-        if (expectedPrice !== receivedAmount) {
+        if (Math.abs(expectedPrice - receivedAmount) > 0.01) {
             throw new ApiError(400, `Amount mismatch. Expected: ${expectedPrice}, Received: ${receivedAmount}`);
         }
 

@@ -2,8 +2,10 @@ import { Router } from "express";
 import { 
     registerUser, 
     loginUser, 
-    logoutUser, 
-    refreshAccessToken ,getCurrentSeatsOfUser
+    refreshAccessToken,
+    getCurrentSeatsOfUser,
+    getUserWinnings,
+    logoutUser
 } from "../controllers/user.controller.js";
 import { verifyUserJWT } from "../middleware/auth.middleware.js";
 
@@ -17,5 +19,6 @@ router.route("/refresh-token").post(refreshAccessToken);
 // Protected routes
 router.route("/logout").post(verifyUserJWT, logoutUser);
 router.route("/current-bookings").get(verifyUserJWT, getCurrentSeatsOfUser);
+router.route("/winnings").get(verifyUserJWT, getUserWinnings);
 
 export default router;

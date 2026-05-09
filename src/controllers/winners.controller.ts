@@ -76,6 +76,8 @@ const getWinnersForRound = asyncHandler(async (req: any, res: any) => {
     );
 });
 
+
+
 const getWinnersForPool = asyncHandler(async (req: any, res: any) => {
     const { poolId } = req.params;
 
@@ -232,5 +234,7 @@ const createWinner = asyncHandler(async (req: any, res: any) => {
         new ApiResponse(201, winner, "Winner created successfully")
     );
 });
+
+
 
 export { getWinnersForRound, getWinnersForPool, markWinnerPaid, createWinner };

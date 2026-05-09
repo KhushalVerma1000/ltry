@@ -25,6 +25,7 @@ import adminUserRouter from "./routes/adminUser.routes.js"
 import poolRouter from "./routes/pool.routees.js"
 import bookingRouter from "./routes/bookSeat.routes.js"
 import SeatRouter from "./routes/seats.routes.js"
+import winnerRouter from "./routes/winner.routes.js"
 
 // routes declaration
 app.use("/api/v1/users", userRouter)
@@ -32,5 +33,6 @@ app.use("/api/v1/admin", adminUserRouter)
 app.use("/api/v1/pools",poolRouter)
 app.use("/api/v1/bookings",bookingRouter)
 app.use("/api/v1/seats",SeatRouter)
+app.use("/api/v1/winners", winnerRouter)
 
 export {app}
