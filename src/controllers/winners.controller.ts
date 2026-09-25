@@ -1,3 +1,4 @@
+import { RoundStatus } from "../db/generated/prisma/enums.js";
 import { prisma } from "../db/index.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
@@ -107,9 +108,16 @@ const getWinnersForPool = asyncHandler(async (req: any, res: any) => {
             paid: true,
             paidAt: true,
             round: {
+                where:{
+                    status:{ 
+                        in: [RoundStatus.DRAWING, RoundStatus.ACTIVE]
+                    }
+                },
                 select: {
                     publicId: true,
-                    roundNumber: true
+                    roundNumber: true,
+                    
+
                 }
             },
             seat: {

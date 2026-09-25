@@ -11,7 +11,7 @@ const getAllPools = asyncHandler(async (req: any, res: any) => {
       publicId: true,
       name: true,
       perSeatPrice: true,
-      totalSeats: true,
+   
       notes: true,
       rounds: {
         where: { status: { in: [RoundStatus.ACTIVE, RoundStatus.DRAWING, RoundStatus.UPCOMING] } },
@@ -36,11 +36,13 @@ const getAllPools = asyncHandler(async (req: any, res: any) => {
     }
   });
 
+
+
   const formattedPools = pools.map((pool) => ({
     publicId: pool.publicId,
     name: pool.name,
     perSeatPrice: pool.perSeatPrice,
-    totalSeats: pool.totalSeats,
+   
     notes: pool.notes,
     activeRound: pool.rounds[0] ? {
       roundNumber: pool.rounds[0].roundNumber,
@@ -56,6 +58,31 @@ const getAllPools = asyncHandler(async (req: any, res: any) => {
   return res
     .status(200)
     .json(new ApiResponse(200, formattedPools, "Pools fetched successfully"));
+});
+
+
+const getPoolsForGames = asyncHandler(async (req: any, res: any) => {
+  let pools = await prisma.pool.findMany({
+    select: {
+      publicId: true,
+      name: true,
+      perSeatPrice: true,
+      totalSeats: true,
+      notes: true
+    }
+  });
+  const poolData = pools.map((pool) => ({
+    publicId: pool.publicId,
+    name: pool.name,
+    winningAmount: Number(pool.perSeatPrice ) * pool.totalSeats * 0.11,
+    perSeatPrice: pool.perSeatPrice,
+    totalSeats: pool.totalSeats,
+    notes: pool.notes
+  }));
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, poolData, "Pools fetched successfully"));
 });
 
 const getPoolById = asyncHandler(async (req: any, res: any) => {
@@ -101,7 +128,7 @@ const getAdminPoolRounds = asyncHandler(async (req: any, res: any) => {
     where: { publicId: poolId },
     select: { id: true }
   });
-
+ 
   if (!pool) {
     throw new ApiError(404, "Pool not found");
   }
