@@ -1,5 +1,6 @@
-import { RoundStatus } from "../db/generated/prisma/enums.js";
+import { RoundStatus, LedgerEntryType, LedgerDirection } from "../db/generated/prisma/enums.js";
 import { prisma } from "../db/index.js";
+import { recordLedgerEntry } from "../services/ledger.service.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -142,27 +143,63 @@ const markWinnerPaid = asyncHandler(async (req: any, res: any) => {
         throw new ApiError(400, "Winner ID is required");
     }
 
-    const winner = await prisma.winner.findUnique({
-        where: { id: parseInt(winnerId) }
-    });
+    const updatedWinner = await prisma.$transaction(async (tx) => {
+        const winner = await tx.winner.findUnique({
+            where: { id: parseInt(winnerId) },
+            select: {
+                id: true,
+                prize: true,
+                paid: true,
+                seat: {
+                    select: {
+                        booking: {
+                            select: { userId: true }
+                        }
+                    }
+                }
+            }
+        });
 
-    if (!winner) {
-        throw new ApiError(404, "Winner not found");
-    }
-
-    const updatedWinner = await prisma.winner.update({
-        where: { id: parseInt(winnerId) },
-        data: {
-            paid: true,
-            paidAt: new Date()
-        },
-        select: {
-            id: true,
-            position: true,
-            prize: true,
-            paid: true,
-            paidAt: true
+        if (!winner) {
+            throw new ApiError(404, "Winner not found");
         }
+
+        if (winner.paid) {
+            throw new ApiError(400, "Winner has already been marked as paid");
+        }
+
+        if (!winner.seat?.booking?.userId) {
+            throw new ApiError(400, "Winning seat has no associated booking/user to credit");
+        }
+
+        const result = await tx.winner.update({
+            where: { id: parseInt(winnerId) },
+            data: {
+                paid: true,
+                paidAt: new Date()
+            },
+            select: {
+                id: true,
+                position: true,
+                prize: true,
+                paid: true,
+                paidAt: true
+            }
+        });
+
+        // Credit the winner's ledger for the prize payout, atomically with
+        // marking the winner as paid.
+        await recordLedgerEntry(tx, {
+            userId: winner.seat.booking.userId,
+            type: LedgerEntryType.WINNER_PAYOUT,
+            direction: LedgerDirection.CREDIT,
+            amount: winner.prize,
+            referenceType: "WINNER",
+            referenceId: String(winner.id),
+            description: `Prize payout for winner ${winner.id}`
+        });
+
+        return result;
     });
 
     return res.status(200).json(

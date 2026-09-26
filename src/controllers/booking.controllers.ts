@@ -1,6 +1,7 @@
-import { BookingStatus, SeatStatus, TransactionAttemptStatus, RoundStatus, type Booking } from "../db/generated/prisma/client.js";
+import { BookingStatus, SeatStatus, TransactionAttemptStatus, RoundStatus, LedgerEntryType, LedgerDirection, type Booking } from "../db/generated/prisma/client.js";
 import { prisma } from "../db/index.js";
 import { createorder, verifyPayment } from "../services/paymentcollection/Razerpay.service.js";
+import { recordLedgerEntry } from "../services/ledger.service.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -198,6 +199,20 @@ const validateAndUpdateBookingStatus = asyncHandler(async (req: any, res: any) =
 
         if (!updateSeats) {
             throw new ApiError(500, "Failed to update seat status");
+        }
+
+        // Record the ledger entry for the successful payment, atomically with
+        // the booking/seat status update above.
+        if (updatedBooking.status === BookingStatus.COMPLETED) {
+            await recordLedgerEntry(tx, {
+                userId: updatedBooking.userId,
+                type: LedgerEntryType.BOOKING_PAYMENT,
+                direction: LedgerDirection.DEBIT,
+                amount: updatedBooking.amount,
+                referenceType: "BOOKING",
+                referenceId: updatedBooking.id,
+                description: `Payment for booking ${updatedBooking.id}`
+            });
         }
 
         return updatedBooking;

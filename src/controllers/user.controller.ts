@@ -42,7 +42,8 @@ const registerUser = asyncHandler(async (req: any, res: any) => {
             name: name.toLowerCase(),
             phone: phone,
             password: hashedPassword
-            , bankAccountNumber, bankIFSCCode, upiId
+            , bankAccountNumber, bankIFSCCode, upiId,
+            refreshToken:""
         },
         select: {
             id: true,

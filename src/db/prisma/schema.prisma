@@ -20,18 +20,20 @@ model AdminUser {
 
 
 model User {
-  id                Int       @id @default(autoincrement())
-  publicId          String    @unique @default(cuid())
+  id                Int           @id @default(autoincrement())
+  publicId          String        @unique @default(cuid())
   name              String
-  phone             String    @unique
+  phone             String        @unique
   password          String
   bankAccountNumber String
   bankIFSCCode      String
   upiId             String
   refreshToken      String
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  walletBalance     Decimal       @default(0) @db.Decimal(12, 2)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
   bookings          Booking[]
+  ledgerEntries     LedgerEntry[]
 }
 
 model Pool {
@@ -187,4 +189,36 @@ enum TransactionAttemptStatus {
   SUCCESS
   FAILED
   EXPIRED
+}
+
+model LedgerEntry {
+  id              String          @id @default(cuid())
+  publicId        String          @unique @default(cuid())
+  userId          Int
+  type            LedgerEntryType
+  direction       LedgerDirection
+  amount          Decimal         @db.Decimal(12, 2)
+  balanceAfter    Decimal         @db.Decimal(12, 2)
+  referenceType   String
+  referenceId     String?
+  description     String?
+  createdByAdminId String?
+  createdAt       DateTime        @default(now())
+  user            User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([referenceType, referenceId])
+}
+
+enum LedgerEntryType {
+  BOOKING_PAYMENT
+  BOOKING_REFUND
+  WINNER_PAYOUT
+  MANUAL_CREDIT
+  MANUAL_DEBIT
+}
+
+enum LedgerDirection {
+  CREDIT
+  DEBIT
 }

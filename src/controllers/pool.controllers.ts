@@ -169,9 +169,19 @@ const getAdminPoolRounds = asyncHandler(async (req: any, res: any) => {
     }
   });
 
+  // Flatten the seat count the frontend actually reads (`availableSeats`) —
+  // it was previously only nested under `_count.seats`, so every "Prize
+  // Pool" figure on the pool page was silently computing against `undefined`.
+  const formattedRounds = rounds.map((round) => ({
+    ...round,
+    availableSeats: round._count.seats,
+    bookingsCount: round._count.bookings,
+    winnersCount: round._count.winners
+  }));
+
   return res
     .status(200)
-    .json(new ApiResponse(200, rounds, "Rounds fetched successfully"));
+    .json(new ApiResponse(200, formattedRounds, "Rounds fetched successfully"));
 });
 
 const getPublicPoolRounds = asyncHandler(async (req: any, res: any) => {
@@ -216,9 +226,16 @@ const getPublicPoolRounds = asyncHandler(async (req: any, res: any) => {
     }
   });
 
+  const formattedRounds = rounds.map((round) => ({
+    ...round,
+    availableSeats: round._count.seats,
+    bookingsCount: round._count.bookings,
+    winnersCount: round._count.winners
+  }));
+
   return res
     .status(200)
-    .json(new ApiResponse(200, rounds, "Rounds fetched successfully"));
+    .json(new ApiResponse(200, formattedRounds, "Rounds fetched successfully"));
 });
 
 const createPool = asyncHandler(async (req: any, res: any) => {

@@ -111,6 +111,10 @@ const getRoundSeats = asyncHandler(async (req: any, res: any) => {
         throw new ApiError(404, "Round not found");
     }
 
+    // Release any seats whose reservation window has quietly lapsed before
+    // showing the current state of the board.
+    await expireStaleBookingsForRound(round.id);
+
     const seats = await prisma.seat.findMany({
         where: { roundId: round.id },
         select: {
@@ -204,6 +208,33 @@ const verifySeatStatus = async (seatids: string[]) => {
     return seats;
 };
 
+// A booking holds its seats as RESERVED for `tokenExpiresAt` (5 min from
+// creation) while the player is on the payment screen. Nothing previously
+// enforced that deadline, so an abandoned checkout could leave seats stuck
+// as RESERVED forever. This is called opportunistically — whenever seats
+// for a round are read, or right before a new booking is created for that
+// round — rather than needing a separate cron process.
+const expireStaleBookingsForRound = async (roundId: number, tx: any = prisma) => {
+    const staleBookings = await tx.booking.findMany({
+        where: {
+            roundId,
+            status: BookingStatus.PENDING,
+            tokenExpiresAt: { lt: new Date() }
+        },
+        select: { id: true }
+    });
+
+    for (const stale of staleBookings) {
+        await tx.booking.update({
+            where: { id: stale.id },
+            data: { status: BookingStatus.EXPIRED }
+        });
+        await updateSeatStatus(stale.id, BookingStatus.EXPIRED, tx);
+    }
+
+    return staleBookings.length;
+};
+
 const updateSeatStatus = async (bookingId: string, bookingStatus: string, tx: any = prisma) => {
     let finalSeatStatus: SeatStatus;
 
@@ -238,5 +269,6 @@ export {
     getRoundSeats, 
     verifySeatStatus, 
     getSeatDetailsByIDForAdmin, 
-    updateSeatStatus 
+    updateSeatStatus,
+    expireStaleBookingsForRound
 };
