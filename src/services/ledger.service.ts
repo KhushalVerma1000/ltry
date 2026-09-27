@@ -16,6 +16,19 @@ import { ApiError } from "../utils/ApiError.js";
  * triggered them (booking completion, payout, etc). The row-level lock taken by
  * the `user.update` below serializes concurrent writers for the same user, so
  * `balanceAfter` is always correct even under concurrent requests.
+ *
+ * INVARIANT: a user's walletBalance can never go negative. A DEBIT is only
+ * applied if the balance can cover it (see the `updateMany` guard below) —
+ * otherwise this throws a 400 and the whole calling transaction rolls back.
+ *
+ * Because of that invariant, any flow that both takes a payment AND spends
+ * it in one step (e.g. a direct ticket purchase, with no pre-existing wallet
+ * balance) MUST record two entries in the same transaction, in this order:
+ *   1. CREDIT (type WALLET_TOPUP) for the amount actually paid in
+ *   2. DEBIT (type BOOKING_PAYMENT, etc.) for the amount being spent
+ * Crediting first means the debit's guard always sees a covered balance for
+ * a same-amount purchase, while still leaving a real, auditable "money in"
+ * row — the same row shape a future top-up-then-spend flow will produce.
  */
 
 export interface RecordLedgerEntryParams {
@@ -41,7 +54,16 @@ const recordLedgerEntry = async (tx: any, params: RecordLedgerEntryParams) => {
         createdByAdminId = null
     } = params;
 
-    const parsedAmount = typeof amount === "string" ? parseFloat(amount) : amount;
+    // `amount` is typed as `number | string`, but callers also legitimately
+    // pass a Prisma Decimal field straight through (e.g. `updatedBooking.amount`
+    // below in booking.controllers.ts). A Decimal is an object, not a number
+    // or string, so the old `: amount` fallback left it unconverted and
+    // `Number.isFinite()` on a Decimal object is always false — every call
+    // with a Decimal amount would have thrown "amount must be a positive
+    // number" instead of recording the entry. `Number(amount)` correctly
+    // converts a Decimal (its `valueOf()` returns the decimal string), a
+    // numeric string, or a plain number.
+    const parsedAmount = typeof amount === "string" ? parseFloat(amount) : Number(amount);
 
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
         throw new ApiError(400, "Ledger entry amount must be a positive number");
@@ -49,10 +71,37 @@ const recordLedgerEntry = async (tx: any, params: RecordLedgerEntryParams) => {
 
     const delta = direction === LedgerDirection.CREDIT ? parsedAmount : -parsedAmount;
 
-    // Atomically adjust the user's running balance and read back the new value.
-    const updatedUser = await tx.user.update({
+    // For a DEBIT, only apply the update if the current balance can cover it.
+    // `updateMany` with `walletBalance: { gte: parsedAmount }` in the WHERE
+    // clause makes the "check current balance, then write" a single atomic
+    // statement at the DB level, so it's race-safe under concurrent debits
+    // for the same user (Postgres row-locks the row for the duration of the
+    // UPDATE, so a second concurrent debit re-evaluates the WHERE against
+    // the value the first one just committed, not a stale read).
+    //
+    // A CREDIT never needs this guard since `parsedAmount` is already
+    // validated as positive above.
+    const result = await tx.user.updateMany({
+        where: {
+            id: userId,
+            ...(direction === LedgerDirection.DEBIT
+                ? { walletBalance: { gte: parsedAmount } }
+                : {})
+        },
+        data: { walletBalance: { increment: delta } }
+    });
+
+    if (result.count === 0) {
+        throw new ApiError(
+            400,
+            "Insufficient wallet balance. Credit the amount to the wallet before debiting it."
+        );
+    }
+
+    // Still inside the same transaction, so this row is the one we just
+    // wrote and is locked until commit — safe to read back for balanceAfter.
+    const updatedUser = await tx.user.findUniqueOrThrow({
         where: { id: userId },
-        data: { walletBalance: { increment: delta } },
         select: { walletBalance: true }
     });
 

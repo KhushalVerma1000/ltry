@@ -211,6 +211,7 @@ model LedgerEntry {
 }
 
 enum LedgerEntryType {
+  WALLET_TOPUP
   BOOKING_PAYMENT
   BOOKING_REFUND
   WINNER_PAYOUT

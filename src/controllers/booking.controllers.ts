@@ -203,9 +203,30 @@ const validateAndUpdateBookingStatus = asyncHandler(async (req: any, res: any) =
             throw new ApiError(500, "Failed to update seat status");
         }
 
-        // Record the ledger entry for the successful payment, atomically with
-        // the booking/seat status update above.
+        // Record the ledger entries for the successful payment, atomically
+        // with the booking/seat status update above.
+        //
+        // Two entries, not one: the ledger enforces that a user's balance
+        // can never go negative (see ledger.service.ts), and this user has
+        // no pre-existing wallet balance for a direct purchase like this —
+        // they just paid Razorpay directly. So we first CREDIT the wallet
+        // with the amount they actually paid in (a WALLET_TOPUP, same shape
+        // a future manual top-up would produce), then DEBIT it for the
+        // ticket purchase. Net effect on the balance is zero, same as
+        // before, but now there's an honest "money in" row backing the
+        // "money out" row instead of one entry that would have driven the
+        // balance negative and tripped the guard.
         if (updatedBooking.status === BookingStatus.COMPLETED) {
+            await recordLedgerEntry(tx, {
+                userId: updatedBooking.userId,
+                type: LedgerEntryType.WALLET_TOPUP,
+                direction: LedgerDirection.CREDIT,
+                amount: updatedBooking.amount,
+                referenceType: "BOOKING",
+                referenceId: updatedBooking.id,
+                description: `Payment received for booking ${updatedBooking.id}`
+            });
+
             await recordLedgerEntry(tx, {
                 userId: updatedBooking.userId,
                 type: LedgerEntryType.BOOKING_PAYMENT,
