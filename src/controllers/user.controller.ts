@@ -280,6 +280,7 @@ const getUserWinnings = asyncHandler(async (req: any, res: any) => {
                     name: true,
                     round: {
                         select: {
+                            publicId:true,
                             roundNumber: true,
                             pool: {
                                 select: {

@@ -6,7 +6,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { arrayParserStringToArray } from "../utils/converterHelper.js";
-import { updateSeatStatus, verifySeatStatus } from "./seats.controllers.js";
+import { updateSeatStatus, verifySeatStatus ,expireStaleBookingsForRound } from "./seats.controllers.js";
 
 const createBooking = asyncHandler(async (req: any, res: any) => {
     const userid = req.user.id;
@@ -43,7 +43,9 @@ const createBooking = asyncHandler(async (req: any, res: any) => {
         if (round.status !== RoundStatus.ACTIVE && round.status !== RoundStatus.UPCOMING) {
             throw new ApiError(400, "Round is not available for booking");
         }
-
+// Release any expired reservations for this round first, so a stale
+// hold from an abandoned checkout can't block a genuine attempt.
+await expireStaleBookingsForRound(round.id, txs);
         // Find all requested seats for this round
         const seatsBooked = await txs.seat.findMany({
             where: {
