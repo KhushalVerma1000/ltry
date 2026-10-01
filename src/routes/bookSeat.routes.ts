@@ -4,10 +4,14 @@ import {
     createBooking,
     validateAndUpdateBookingStatus,
     handlePaymentDismiss,
-    handlePaymentFailure 
+    handlePaymentFailure,
+    lookupTicket
 } from "../controllers/booking.controllers.js";
 
 const router = Router();
+
+// Public — "check your ticket" lookup, no login required
+router.route("/lookup/:ticketId").get(lookupTicket);
 
 // Booking routes
 router.route("/bookSeats").post(verifyUserJWT, createBooking);

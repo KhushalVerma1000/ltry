@@ -37,4 +37,28 @@ app.use("/api/v1/seats",SeatRouter)
 app.use("/api/v1/winners", winnerRouter)
 app.use("/api/v1/ledger", ledgerRouter)
 
+// Global error handler — must be registered after all routes. Without this,
+// an ApiError thrown anywhere (e.g. lookupTicket's 404) falls through to
+// Express's default handler, which returns an HTML error page instead of
+// JSON even though the status code is still correct. Any client parsing
+// the body as JSON (like the frontend's proxy routes) would otherwise fail.
+import { ApiError } from "./utils/ApiError.js"
+
+app.use((err: any, req: any, res: any, next: any) => {
+    if (err instanceof ApiError) {
+        return res.status(err.statusCode).json({
+            success: false,
+            message: err.message,
+            errors: err.errors,
+            data: err.data
+        })
+    }
+
+    console.error(err)
+    return res.status(500).json({
+        success: false,
+        message: "Something went wrong"
+    })
+})
+
 export {app}

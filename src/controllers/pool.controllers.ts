@@ -11,7 +11,7 @@ const getAllPools = asyncHandler(async (req: any, res: any) => {
       publicId: true,
       name: true,
       perSeatPrice: true,
-   
+      totalSeats: true,
       notes: true,
       rounds: {
         where: { status: { in: [RoundStatus.ACTIVE, RoundStatus.DRAWING, RoundStatus.UPCOMING] } },
@@ -38,22 +38,32 @@ const getAllPools = asyncHandler(async (req: any, res: any) => {
 
 
 
-  const formattedPools = pools.map((pool) => ({
-    publicId: pool.publicId,
-    name: pool.name,
-    perSeatPrice: pool.perSeatPrice,
-   
-    notes: pool.notes,
-    activeRound: pool.rounds[0] ? {
-      roundNumber: pool.rounds[0].roundNumber,
-      publicId: pool.rounds[0].publicId,
-      status: pool.rounds[0].status,
-      startsAt: pool.rounds[0].startsAt,
-      endsAt: pool.rounds[0].endsAt,
-      drawnAt: pool.rounds[0].drawnAt,
-      availableSeats: pool.rounds[0]._count.seats
-    } : null
-  }));
+  const formattedPools = pools.map((pool) => {
+    const round = pool.rounds[0];
+    const availableSeats = round ? round._count.seats : null;
+    const soldSeats = round ? Math.max(pool.totalSeats - availableSeats!, 0) : null;
+
+    return {
+      publicId: pool.publicId,
+      name: pool.name,
+      perSeatPrice: pool.perSeatPrice,
+      totalSeats: pool.totalSeats,
+      notes: pool.notes,
+      activeRound: round ? {
+        roundNumber: round.roundNumber,
+        publicId: round.publicId,
+        status: round.status,
+        startsAt: round.startsAt,
+        endsAt: round.endsAt,
+        drawnAt: round.drawnAt,
+        availableSeats,
+        soldSeats,
+        // Prize pool = value of seats already sold in this round, so it
+        // grows as bookings come in rather than shrinking from a full pot.
+        prizePool: soldSeats !== null ? Number(pool.perSeatPrice) * soldSeats : 0
+      } : null
+    };
+  });
 
   return res
     .status(200)

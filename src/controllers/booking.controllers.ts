@@ -330,9 +330,89 @@ const handlePaymentDismiss = asyncHandler(async (req: any, res: any) => {
     );
 });
 
+// Public "check your ticket" lookup — no auth required, same as scanning a
+// physical lottery ticket. Keyed by the booking's own id (an unguessable
+// cuid), never by phone/name, so this can't be used to browse other users'
+// purchases or winnings.
+const lookupTicket = asyncHandler(async (req: any, res: any) => {
+    const { ticketId } = req.params;
+
+    if (!ticketId) {
+        throw new ApiError(400, "ticketId is required");
+    }
+
+    const booking = await prisma.booking.findUnique({
+        where: { id: ticketId },
+        select: {
+            id: true,
+            status: true,
+            amount: true,
+            createdAt: true,
+            round: {
+                select: {
+                    publicId: true,
+                    roundNumber: true,
+                    status: true,
+                    drawnAt: true,
+                    pool: { select: { publicId: true, name: true } }
+                }
+            },
+            bookedSeats: {
+                select: {
+                    seatName: true,
+                    seatId: true
+                }
+            }
+        }
+    });
+
+    if (!booking) {
+        throw new ApiError(404, "No ticket found with that ID. Double-check the ticket ID and try again.");
+    }
+
+    const seatIds = booking.bookedSeats.map(s => s.seatId);
+    const winners = seatIds.length
+        ? await prisma.winner.findMany({
+            where: { seatId: { in: seatIds } },
+            select: { seatId: true, position: true, prize: true, paid: true }
+        })
+        : [];
+
+    const winnersBySeat = new Map(winners.map(w => [w.seatId, w]));
+
+    const result = {
+        ticketId: booking.id,
+        status: booking.status,
+        amount: booking.amount,
+        purchasedAt: booking.createdAt,
+        pool: booking.round.pool,
+        round: {
+            publicId: booking.round.publicId,
+            roundNumber: booking.round.roundNumber,
+            status: booking.round.status,
+            drawnAt: booking.round.drawnAt
+        },
+        seats: booking.bookedSeats.map(s => {
+            const win = winnersBySeat.get(s.seatId);
+            return {
+                name: s.seatName,
+                isWinner: !!win,
+                position: win?.position ?? null,
+                prize: win?.prize ?? null,
+                paid: win?.paid ?? null
+            };
+        })
+    };
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, result, "Ticket found"));
+});
+
 export { 
     createBooking, 
     validateAndUpdateBookingStatus, 
     handlePaymentFailure, 
-    handlePaymentDismiss 
+    handlePaymentDismiss,
+    lookupTicket
 };
