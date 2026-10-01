@@ -323,38 +323,44 @@ const setWinnerSeats = asyncHandler(async (req: any, res: any) => {
     // Validate winnerSeats is an array
     winnerSeats = arrayParserStringToArray(winnerSeats);
 
-    // Verify all seats exist in this round
-    const seatsValidForRound = await prisma.seat.findMany({
+    if (!Array.isArray(winnerSeats) || winnerSeats.length === 0) {
+        throw new ApiError(400, "winnerSeats must be a non-empty array");
+    }
+
+    // Seats may be identified by publicId (admin UI) or numeric id (draw result).
+    const publicIds = winnerSeats.map((seat: any) => seat?.publicId).filter(Boolean);
+    const numericIds = winnerSeats.map((seat: any) => seat?.id).filter((v: any) => typeof v === "number");
+
+    if (publicIds.length + numericIds.length !== winnerSeats.length) {
+        throw new ApiError(400, "Each seat must have a publicId or numeric id, and a numeric position");
+    }
+
+    const seatsInRound = await prisma.seat.findMany({
         where: {
             roundId: round.id,
-            id: {
-                in: winnerSeats.map((seat: any) => seat.id)
-            }
+            OR: [
+                { publicId: { in: publicIds } },
+                { id: { in: numericIds } }
+            ]
         },
-        select: { id: true }
+        select: { id: true, publicId: true }
     });
 
-    if (seatsValidForRound.length !== winnerSeats.length) {
+    const byPublicId = new Map(seatsInRound.map((s: any) => [s.publicId, s.id]));
+    const byId = new Set(seatsInRound.map((s: any) => s.id));
+
+    const resolved = winnerSeats.map((seat: any) => ({
+        seatId: seat.publicId ? byPublicId.get(seat.publicId) : (byId.has(seat.id) ? seat.id : undefined),
+        position: seat.position
+    }));
+
+    if (resolved.some((r: any) => r.seatId === undefined || typeof r.position !== "number")) {
         throw new ApiError(400, "Some winner seats are not valid for the specified round");
     }
 
-    // Validate each winner seat structure
-    const isValidWinnerSeats = winnerSeats.every((seat: any) => {
-        return (
-            typeof seat === 'object' &&
-            seat !== null &&
-            typeof seat.id === 'number' &&
-            typeof seat.position === 'number'
-        );
-    });
-
-    if (!isValidWinnerSeats) {
-        throw new ApiError(400, "Each seat must have id (number) and position (number)");
-    }
-
     // Prepare winner data with roundId and poolId
-    const winnerData = winnerSeats.map((seat: winnerSeats) => ({
-        seatId: seat.id,
+    const winnerData = resolved.map((seat: any) => ({
+        seatId: seat.seatId,
         roundId: round.id,
         poolId: pool.id,
         position: seat.position,
