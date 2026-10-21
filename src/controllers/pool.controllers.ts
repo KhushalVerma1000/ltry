@@ -58,9 +58,9 @@ const getAllPools = asyncHandler(async (req: any, res: any) => {
         drawnAt: round.drawnAt,
         availableSeats,
         soldSeats,
-        // Prize pool = value of seats already sold in this round, so it
-        // grows as bookings come in rather than shrinking from a full pot.
-        prizePool: soldSeats !== null ? Number(pool.perSeatPrice) * soldSeats : 0
+        // Prize pool is fixed for the pool: seat price x total seats.
+        // It does not change as seats fill.
+        prizePool: Number(pool.perSeatPrice) * pool.totalSeats
       } : null
     };
   });
