@@ -97,7 +97,12 @@ const getWinnersForPool = asyncHandler(async (req: any, res: any) => {
     }
 
     const winners = await prisma.winner.findMany({
-        where: { poolId: pool.id },
+        where: {
+            poolId: pool.id,
+            round: {
+                status: { in: [RoundStatus.DRAWING, RoundStatus.ACTIVE] }
+            }
+        },
         orderBy: [
             { roundId: "desc" },
             { position: "asc" }
@@ -109,16 +114,9 @@ const getWinnersForPool = asyncHandler(async (req: any, res: any) => {
             paid: true,
             paidAt: true,
             round: {
-                where:{
-                    status:{ 
-                        in: [RoundStatus.DRAWING, RoundStatus.ACTIVE]
-                    }
-                },
                 select: {
                     publicId: true,
-                    roundNumber: true,
-                    
-
+                    roundNumber: true
                 }
             },
             seat: {
