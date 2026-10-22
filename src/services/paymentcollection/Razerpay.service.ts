@@ -2,6 +2,7 @@
 import Razorpay from "razorpay";
 import { ApiError } from "../../utils/ApiError.js";
 import { validatePaymentVerification } from "razorpay/dist/utils/razorpay-utils.js";
+import crypto from "node:crypto";
 
 const Razerpay = new Razorpay({
   key_id: process.env.RAZERPAY_KEY_ID as string,
@@ -46,4 +47,30 @@ const isvalid =  validatePaymentVerification({"order_id": razorpay_order_id, "pa
   return isvalid;
 }
 
-export { createorder, verifyPayment}
+// Webhook signature: HMAC-SHA256 of the *raw* request body using the webhook
+// secret (set in Razorpay Dashboard > Webhooks; NOT the API key secret).
+// Must be compared in constant time.
+const verifyWebhookSignature = (rawBody: Buffer, signature: string | undefined) => {
+  const secret = process.env.RAZERPAY_WEBHOOK_SECRET;
+  if (!secret) {
+    throw new ApiError(500, "Webhook secret is not configured");
+  }
+  if (!signature) return false;
+
+  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(signature, "utf8");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
+// Refund a captured payment in full (amount in rupees). Used when a payment
+// lands for a booking whose seats can no longer be honoured.
+const refundPayment = async (paymentId: string, amountRupees: number, bookingId: string) => {
+  return Razerpay.payments.refund(paymentId, {
+    amount: Math.round(amountRupees * 100),
+    speed: "normal",
+    notes: { reason: "Seats unavailable for late payment", bookingId },
+  });
+};
+
+export { createorder, verifyPayment, verifyWebhookSignature, refundPayment }

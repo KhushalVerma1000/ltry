@@ -1,7 +1,7 @@
-import { BookingStatus, SeatStatus, TransactionAttemptStatus, RoundStatus, LedgerEntryType, LedgerDirection, type Booking } from "../db/generated/prisma/client.js";
+import { BookingStatus, SeatStatus, TransactionAttemptStatus, RoundStatus, type Booking } from "../db/generated/prisma/client.js";
 import { prisma } from "../db/index.js";
 import { createorder, verifyPayment } from "../services/paymentcollection/Razerpay.service.js";
-import { recordLedgerEntry } from "../services/ledger.service.js";
+import { runFinalizeBookingPayment } from "../services/paymentcollection/bookingPayment.service.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -158,7 +158,7 @@ const updateBookingStatus = async (bookingId: string, paymentStatus: string, tx:
 };
 
 const validateAndUpdateBookingStatus = asyncHandler(async (req: any, res: any) => {
-    const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+    const { razorpay_payment_id, razorpay_order_id } = req.body;
 
     const isPaymentValid = await verifyPayment(req, res);
 
@@ -166,83 +166,34 @@ const validateAndUpdateBookingStatus = asyncHandler(async (req: any, res: any) =
         throw new ApiError(400, "Payment verification failed");
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-        const booking = await tx.booking.findFirst({
-            where: { providerOrderId: razorpay_order_id }
-        });
-
-        if (!booking) {
-            throw new ApiError(404, "Booking not found for the given order id");
-        }
-
-        const paymentStatus = isPaymentValid ? "COMPLETED" : "FAILED";
-        const transactionAttemptStatus = paymentStatus === "COMPLETED" 
-            ? TransactionAttemptStatus.SUCCESS 
-            : TransactionAttemptStatus.FAILED;
-
-        await tx.transaction.create({
-            data: {
-                bookingId: booking.id,
-                paymentGateway: "RAZORPAY",
-                gatewayOrderId: razorpay_order_id,
-                gatewayPaymentId: razorpay_payment_id,
-                transactionAttemptStatus: transactionAttemptStatus,
-                amount: booking.amount
-            }
-        });
-
-        const updatedBooking = await updateBookingStatus(booking.id, paymentStatus, tx);
-
-        if (!updatedBooking) {
-            throw new ApiError(500, "Failed to update booking status");
-        }
-
-        const updateSeats = await updateSeatStatus(updatedBooking.id, updatedBooking.status, tx);
-
-        if (!updateSeats) {
-            throw new ApiError(500, "Failed to update seat status");
-        }
-
-        // Record the ledger entries for the successful payment, atomically
-        // with the booking/seat status update above.
-        //
-        // Two entries, not one: the ledger enforces that a user's balance
-        // can never go negative (see ledger.service.ts), and this user has
-        // no pre-existing wallet balance for a direct purchase like this —
-        // they just paid Razorpay directly. So we first CREDIT the wallet
-        // with the amount they actually paid in (a WALLET_TOPUP, same shape
-        // a future manual top-up would produce), then DEBIT it for the
-        // ticket purchase. Net effect on the balance is zero, same as
-        // before, but now there's an honest "money in" row backing the
-        // "money out" row instead of one entry that would have driven the
-        // balance negative and tripped the guard.
-        if (updatedBooking.status === BookingStatus.COMPLETED) {
-            await recordLedgerEntry(tx, {
-                userId: updatedBooking.userId,
-                type: LedgerEntryType.WALLET_TOPUP,
-                direction: LedgerDirection.CREDIT,
-                amount: updatedBooking.amount,
-                referenceType: "BOOKING",
-                referenceId: updatedBooking.id,
-                description: `Payment received for booking ${updatedBooking.id}`
-            });
-
-            await recordLedgerEntry(tx, {
-                userId: updatedBooking.userId,
-                type: LedgerEntryType.BOOKING_PAYMENT,
-                direction: LedgerDirection.DEBIT,
-                amount: updatedBooking.amount,
-                referenceType: "BOOKING",
-                referenceId: updatedBooking.id,
-                description: `Payment for booking ${updatedBooking.id}`
-            });
-        }
-
-        return updatedBooking;
+    const booking = await prisma.booking.findFirst({
+        where: { providerOrderId: razorpay_order_id, userId: req.user.id }
     });
 
+    if (!booking) {
+        throw new ApiError(404, "Booking not found for the given order id");
+    }
+
+    // Shared with the Razorpay webhook. Idempotent: if the webhook already
+    // completed this booking, this returns ALREADY_COMPLETED without writing
+    // a second transaction row or second set of ledger entries.
+    const result = await runFinalizeBookingPayment({
+        bookingId: booking.id,
+        gatewayOrderId: razorpay_order_id,
+        gatewayPaymentId: razorpay_payment_id
+    });
+
+    if (result.outcome === "NEEDS_REFUND") {
+        // Signature was valid, so the money was taken, but the seats are gone.
+        // The webhook performs the actual refund; tell the user honestly.
+        throw new ApiError(
+            409,
+            "Your payment was received after the seat hold expired and the seats were taken. It will be refunded automatically."
+        );
+    }
+
     return res.status(200).json(
-        new ApiResponse(200, result.status, "Payment verification completed and booking status updated")
+        new ApiResponse(200, BookingStatus.COMPLETED, "Payment verification completed and booking status updated")
     );
 });
 
@@ -255,6 +206,14 @@ const handlePaymentFailure = asyncHandler(async (req: any, res: any) => {
 
     if (!booking) {
         throw new ApiError(404, "Booking not found for the given order id");
+    }
+
+    // A late client-side "failed/dismissed" report must never undo a booking the
+    // webhook (or verifyPayment) already completed.
+    if (booking.status !== BookingStatus.PENDING) {
+        return res.status(200).json(
+            new ApiResponse(200, booking.status, "Booking already finalized")
+        );
     }
 
     await prisma.transaction.create({
@@ -299,6 +258,14 @@ const handlePaymentDismiss = asyncHandler(async (req: any, res: any) => {
 
     if (!booking) {
         throw new ApiError(404, "Booking not found for the given order id");
+    }
+
+    // A late client-side "failed/dismissed" report must never undo a booking the
+    // webhook (or verifyPayment) already completed.
+    if (booking.status !== BookingStatus.PENDING) {
+        return res.status(200).json(
+            new ApiResponse(200, booking.status, "Booking already finalized")
+        );
     }
 
     await prisma.transaction.create({
