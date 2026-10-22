@@ -151,7 +151,7 @@ const logoutUser = asyncHandler(async (req: any, res: any) => {
 
     await prisma.user.update({
         where: { id: userId },
-        data: { refreshToken: null }
+        data: { refreshToken: "" }
     });
 
     return res.status(200)
