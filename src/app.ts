@@ -68,4 +68,8 @@ app.use((err: any, req: any, res: any, next: any) => {
     })
 })
 
-export {app}
+export { app }
+
+// Vercel picks src/app.ts as the entry point and needs the Express app as the
+// default export. The named export above is kept for src/index.ts.
+export default app
