@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs the same checks Vercel's build does, so errors are caught before push.
+echo "Pre-push: prisma generate + typecheck + lint..."
+npx prisma generate >/dev/null || { echo "prisma generate failed - push aborted."; exit 1; }
+npm run typecheck || { echo "Typecheck failed - push aborted."; exit 1; }
+npm run lint -- --quiet || { echo "Lint errors - push aborted."; exit 1; }

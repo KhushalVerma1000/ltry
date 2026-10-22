@@ -72,7 +72,7 @@ const getAllPools = asyncHandler(async (req: any, res: any) => {
 
 
 const getPoolsForGames = asyncHandler(async (req: any, res: any) => {
-  let pools = await prisma.pool.findMany({
+  const pools = await prisma.pool.findMany({
     select: {
       publicId: true,
       name: true,

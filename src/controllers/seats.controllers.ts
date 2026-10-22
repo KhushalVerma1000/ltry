@@ -13,7 +13,7 @@ export const generateSeatNameForRound = (numberOfSeats: number, startFrom: numbe
     if (numberOfSeats % 4 !== 0) {
         throw new ApiError(400, "Number of seats must be divisible by 4.");
     }
-    let seatNames: string[] = [];
+    const seatNames: string[] = [];
 
     for (let i = 0; i < 4; i++) {
         for (let j = 1; j <= seatsPerRow; j++) {

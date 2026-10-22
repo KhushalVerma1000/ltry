@@ -296,7 +296,8 @@ const drawWinnerSeats = asyncHandler(async (req: any, res: any) => {
 
 
 const setWinnerSeats = asyncHandler(async (req: any, res: any) => {
-    let { poolId, roundId, winnerSeats } = req.body;
+    const { poolId, roundId } = req.body;
+    let { winnerSeats } = req.body;
 
     if (!poolId || !roundId || !winnerSeats) {
         throw new ApiError(400, "poolId, roundId, and winnerSeats are required");

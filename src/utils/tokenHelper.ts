@@ -48,7 +48,7 @@ export const verifyAccessToken = (token: string): TokenPayload => {
         }
         return jwt.verify(token, secret as string) as TokenPayload;
     } catch (error) {
-        throw new Error('Invalid access token');
+        throw new Error('Invalid access token', { cause: error });
     }
 };
 
@@ -61,7 +61,7 @@ export const verifyRefreshToken = (token: string): TokenPayload => {
         }
         return jwt.verify(token, secret as string) as TokenPayload;
     } catch (error) {
-        throw new Error('Invalid refresh token');
+        throw new Error('Invalid refresh token', { cause: error });
     }
 };
 
