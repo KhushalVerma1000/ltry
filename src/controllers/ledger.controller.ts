@@ -21,10 +21,28 @@ const getMyLedger = asyncHandler(async (req: any, res: any) => {
     });
     const balance = await getCurrentBalance(userId);
 
+    // Wallet balance nets to ~0 now that every purchase and payout is a
+    // credit + debit pair, so expose real lifetime totals for the UI instead.
+    const [spent, won] = await Promise.all([
+        prisma.ledgerEntry.aggregate({
+            where: { userId, type: LedgerEntryType.BOOKING_PAYMENT },
+            _sum: { amount: true }
+        }),
+        prisma.ledgerEntry.aggregate({
+            where: { userId, type: LedgerEntryType.WINNER_PAYOUT },
+            _sum: { amount: true }
+        })
+    ]);
+
     return res.status(200).json(
         new ApiResponse(
             200,
-            { balance, ...paginationHelper.format(entries, total) },
+            {
+                balance,
+                totalSpent: spent._sum.amount ?? 0,
+                totalWon: won._sum.amount ?? 0,
+                ...paginationHelper.format(entries, total)
+            },
             "Ledger fetched successfully"
         )
     );

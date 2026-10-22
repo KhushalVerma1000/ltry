@@ -185,8 +185,12 @@ const markWinnerPaid = asyncHandler(async (req: any, res: any) => {
             }
         });
 
-        // Credit the winner's ledger for the prize payout, atomically with
-        // marking the winner as paid.
+        // Two entries, same pattern as a seat purchase (see booking.controllers.ts):
+        //   1. CREDIT WINNER_PAYOUT  -> the prize won, "money in"
+        //   2. DEBIT  WITHDRAWAL -> the prize withdrawn by the winner
+        // Credit first so the debit's non-negative-balance guard is satisfied.
+        // Net balance effect is zero; the ledger now shows both the win and
+        // the withdrawal instead of one lone credit.
         await recordLedgerEntry(tx, {
             userId: winner.seat.booking.userId,
             type: LedgerEntryType.WINNER_PAYOUT,
@@ -194,7 +198,17 @@ const markWinnerPaid = asyncHandler(async (req: any, res: any) => {
             amount: winner.prize,
             referenceType: "WINNER",
             referenceId: String(winner.id),
-            description: `Prize payout for winner ${winner.id}`
+            description: `Prize won (winner ${winner.id})`
+        });
+
+        await recordLedgerEntry(tx, {
+            userId: winner.seat.booking.userId,
+            type: LedgerEntryType.WITHDRAWAL,
+            direction: LedgerDirection.DEBIT,
+            amount: winner.prize,
+            referenceType: "WINNER",
+            referenceId: String(winner.id),
+            description: `Prize withdrawal (winner ${winner.id})`
         });
 
         return result;
