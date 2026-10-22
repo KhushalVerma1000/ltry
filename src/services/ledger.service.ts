@@ -35,8 +35,7 @@ export interface RecordLedgerEntryParams {
     userId: number;
     type: LedgerEntryType;
     direction: LedgerDirection;
-    amount: number | string;
-    referenceType: string;
+amount: number | string | { toNumber(): number };    referenceType: string;
     referenceId?: string | null;
     description?: string | null;
     createdByAdminId?: string | null;
