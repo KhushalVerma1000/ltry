@@ -4,6 +4,7 @@ import {
     loginUser, 
     refreshAccessToken,
     getCurrentSeatsOfUser,
+    getcurrentUser,
     getUserWinnings,
     logoutUser
 } from "../controllers/user.controller.js";
@@ -18,6 +19,7 @@ router.route("/refresh-token").post(refreshAccessToken);
 
 // Protected routes
 router.route("/logout").post(verifyUserJWT, logoutUser);
+router.route("/me").get(verifyUserJWT, getcurrentUser);
 router.route("/current-bookings").get(verifyUserJWT, getCurrentSeatsOfUser);
 router.route("/winnings").get(verifyUserJWT, getUserWinnings);
 

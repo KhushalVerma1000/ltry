@@ -119,7 +119,7 @@ const loginUser = asyncHandler(async (req: any, res: any) => {
         data: { refreshToken: refreshToken }
     });
 
-    const { password: _, refreshToken: __, ...userWithoutSensitiveData } = user;
+    const { password: _, refreshToken: __, payoutVerifiedByAdminId: ___, payoutVerificationNote: ____, ...userWithoutSensitiveData } = user;
 
 
 
@@ -196,11 +196,44 @@ const refreshAccessToken = asyncHandler(async (req: any, res: any) => {
 });
 
 
+// GET /users/me — the signed-in user's own profile plus their payout
+// verification status, so the app can tell them why a prize is on hold.
+// The admin's note is only exposed when the details were REJECTED.
 const getcurrentUser = asyncHandler(async (req: any, res: any) => {
     const userId = req.user?.id;
     if (!userId) {
         throw new ApiError(401, "Unauthorized");
     }
+
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+            publicId: true,
+            name: true,
+            phone: true,
+            payoutVerification: true,
+            payoutVerifiedAt: true,
+            payoutVerificationNote: true
+        }
+    });
+
+    if (!user) {
+        throw new ApiError(404, "User not found");
+    }
+
+    const { payoutVerificationNote, ...rest } = user;
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                ...rest,
+                payoutVerificationReason:
+                    user.payoutVerification === "REJECTED" ? payoutVerificationNote : null
+            },
+            "Current user fetched successfully"
+        )
+    );
 })
 
 

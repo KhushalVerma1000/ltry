@@ -30,10 +30,19 @@ model User {
   upiId             String
   refreshToken      String
   walletBalance     Decimal       @default(0) @db.Decimal(12, 2)
+  // Manual admin check of the user's bank/UPI details. A winner's prize can
+  // only be marked paid once this is VERIFIED.
+  payoutVerification       PayoutVerificationStatus @default(UNVERIFIED)
+  payoutVerifiedAt         DateTime?
+  payoutVerifiedByAdminId  String?
+  // Shown to the user when REJECTED, so write it as a reason they can act on.
+  payoutVerificationNote   String?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
   bookings          Booking[]
   ledgerEntries     LedgerEntry[]
+
+  @@index([payoutVerification])
 }
 
 model Pool {
@@ -223,4 +232,25 @@ enum LedgerEntryType {
 enum LedgerDirection {
   CREDIT
   DEBIT
+}
+
+enum PayoutVerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+}
+
+// Append-only record of sensitive admin actions (verification decisions,
+// marking prizes paid, ...). Never updated or deleted by the app.
+model AdminAuditLog {
+  id         String   @id @default(cuid())
+  adminId    String
+  action     String
+  targetType String
+  targetId   String
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([adminId, createdAt])
 }
